@@ -1,0 +1,67 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ap-r2-upload-client",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-05",
+
+  // R2 bucket uploads land in. Add "remote": true to hit the real bucket from
+  // `wrangler dev` instead of local storage.
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "demo-services"
+    }
+  ],
+
+  // Static assets are served WITHOUT invoking the Worker, so /api/* must be
+  // routed to the Worker explicitly. Requires wrangler >= 4.20.0.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "vars": {
+    // Cloudflare Access team domain, e.g. "https://yourteam.cloudflareaccess.com".
+    // Fill in after enabling Access on the Worker.
+    "TEAM_DOMAIN": "https://restless-night-6892.cloudflareaccess.com",
+    // The Access application's Audience (AUD) tag.
+    "POLICY_AUD": "",
+    // Optional: confine all uploads under this prefix. Set to "" to allow
+    // uploads anywhere in the bucket (bucket-wide browsing and upload).
+    "UPLOAD_PREFIX": "",
+    // MUST be "true" in production. "false" only for local `wrangler dev`,
+    // where no Access JWT exists.
+    "REQUIRE_ACCESS": "true"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "env": {
+    "production": {
+      "name": "r2-upload-client-prod",
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "CHANGEME-prod"
+        }
+      ],
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/api/*"]
+      },
+      "vars": {
+        "TEAM_DOMAIN": "",
+        "POLICY_AUD": "",
+        "UPLOAD_PREFIX": "",
+        "REQUIRE_ACCESS": "true"
+      },
+      "observability": {
+        "enabled": true
+      }
+    }
+  }
+}
