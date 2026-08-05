@@ -1,0 +1,22 @@
+{
+  "name": "r2-upload-client",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Worker-based upload client for Cloudflare R2 with folder browsing and theme support. Reusable across engagements.",
+  "scripts": {
+    "dev": "wrangler dev --var REQUIRE_ACCESS:false",
+    "dev:remote": "wrangler dev --var REQUIRE_ACCESS:false --remote",
+    "deploy": "wrangler deploy",
+    "deploy:prod": "wrangler deploy --env production",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "wrangler": "^4.20.0"
+  },
+  "overrides": {
+  "undici": "^7.29.0"
+  }
+}

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="system">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>R2 Upload</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div class="header-left">
+        <div class="brand-kicker">Associated Press</div>
+        <h1>R2 Upload</h1>
+        <p class="subtitle">
+          Uploads to <code id="bucket-note">R2</code>. Objects can be added, never deleted.
+        </p>
+      </div>
+      <div class="header-right">
+        <label class="theme-label" for="theme-select" title="Appearance">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="8" cy="8" r="3.5"/>
+            <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41"/>
+          </svg>
+          <select id="theme-select">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+            <option value="grey">Grey</option>
+          </select>
+        </label>
+      </div>
+    </header>
+
+    <!-- Folder browser -->
+    <section class="browser" id="browser">
+      <div class="browser-bar">
+        <span class="browser-label">Location</span>
+        <nav class="breadcrumb" id="breadcrumb" aria-label="Bucket path">
+          <button class="crumb" data-prefix="">/ (root)</button>
+        </nav>
+      </div>
+      <div class="folder-grid" id="folder-grid">
+        <p class="browser-loading" id="browser-loading">Loading…</p>
+      </div>
+      <div class="browser-more" id="browser-more" hidden>
+        <button class="btn btn-sm" id="load-more-btn">Load more…</button>
+      </div>
+      <div class="browser-new" id="browser-new">
+        <input type="text" id="new-folder" placeholder="New folder name" autocomplete="off" />
+        <button class="btn btn-sm" id="new-folder-btn">Create &amp; enter</button>
+      </div>
+    </section>
+
+    <!-- Dropzone -->
+    <section class="upload-area">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose files to upload">
+        <input type="file" id="file-input" multiple hidden />
+        <div class="dropzone-inner">
+          <svg class="dropzone-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32" height="32">
+            <path d="M12 16V4m0 0L8 8m4-4l4 4"/>
+            <path d="M4 17v2a1 1 0 001 1h14a1 1 0 001-1v-2"/>
+          </svg>
+          <p><strong>Drop files here, or click to choose</strong></p>
+          <p class="hint" id="size-hint">Files over 50 MB are uploaded in 50 MB parts.</p>
+        </div>
+      </div>
+
+      <label class="overwrite-label">
+        <input type="checkbox" id="overwrite" />
+        Allow overwriting an existing object
+      </label>
+    </section>
+
+    <!-- Pending / Queue -->
+    <section class="queue" id="queue" hidden>
+      <div class="queue-header">
+        <div class="queue-summary" id="queue-summary"></div>
+        <div class="queue-actions">
+          <button class="btn btn-primary" id="upload-btn" hidden>Upload</button>
+          <button class="btn btn-sm" id="clear-done">Clear finished</button>
+        </div>
+      </div>
+      <ul id="file-list" class="file-list"></ul>
+    </section>
+
+    <div class="banner" id="banner" hidden></div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
