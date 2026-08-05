@@ -39,12 +39,16 @@
         <nav class="breadcrumb" id="breadcrumb" aria-label="Bucket path">
           <button class="crumb" data-prefix="">/ (root)</button>
         </nav>
+        <label class="browser-search" for="browser-search">
+          <span class="sr-only">Search this folder</span>
+          <input type="search" id="browser-search" placeholder="Search this folder…" autocomplete="off" />
+        </label>
       </div>
       <div class="folder-grid" id="folder-grid">
         <p class="browser-loading" id="browser-loading">Loading…</p>
       </div>
       <div class="browser-more" id="browser-more" hidden>
-        <button class="btn btn-sm" id="load-more-btn">Load more…</button>
+        <button class="btn btn-sm" id="load-more-btn">Load more</button>
       </div>
       <div class="browser-new" id="browser-new">
         <input type="text" id="new-folder" placeholder="New folder name" autocomplete="off" />
@@ -75,7 +79,13 @@
     <!-- Pending / Queue -->
     <section class="queue" id="queue" hidden>
       <div class="queue-header">
-        <div class="queue-summary" id="queue-summary"></div>
+        <div class="queue-meta">
+          <label class="queue-select-all" id="queue-select-all-wrap" hidden>
+            <input type="checkbox" id="queue-select-all" />
+            <span>Select all</span>
+          </label>
+          <div class="queue-summary" id="queue-summary"></div>
+        </div>
         <div class="queue-actions">
           <button class="btn btn-primary" id="upload-btn" hidden>Upload</button>
           <button class="btn btn-sm" id="clear-done">Clear finished</button>

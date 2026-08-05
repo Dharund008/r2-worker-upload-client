@@ -22,6 +22,7 @@ const els = {
   browserLoading: document.getElementById("browser-loading"),
   browserMore: document.getElementById("browser-more"),
   loadMoreBtn: document.getElementById("load-more-btn"),
+  browserSearch: document.getElementById("browser-search"),
   newFolder: document.getElementById("new-folder"),
   newFolderBtn: document.getElementById("new-folder-btn"),
   // Upload
@@ -30,6 +31,8 @@ const els = {
   overwrite: document.getElementById("overwrite"),
   // Queue
   queue: document.getElementById("queue"),
+  queueSelectAllWrap: document.getElementById("queue-select-all-wrap"),
+  queueSelectAll: document.getElementById("queue-select-all"),
   queueSummary: document.getElementById("queue-summary"),
   uploadBtn: document.getElementById("upload-btn"),
   clearDone: document.getElementById("clear-done"),
@@ -51,6 +54,7 @@ let config = {
 let currentPrefix = "";
 let browseCursor = null;
 let browseLoading = false;
+let browserRenderedCount = 0;
 
 const items = []; // upload records
 let pumping = false; // one file at a time
@@ -116,10 +120,19 @@ function wireBrowser() {
   els.loadMoreBtn.addEventListener("click", () => {
     if (browseCursor) browse(currentPrefix, browseCursor);
   });
+  els.browserSearch.addEventListener("input", applyBrowserFilter);
 
   els.newFolderBtn.addEventListener("click", createAndEnterFolder);
   els.newFolder.addEventListener("keydown", (e) => {
     if (e.key === "Enter") createAndEnterFolder();
+  });
+
+  els.queueSelectAll.addEventListener("change", () => {
+    const checked = els.queueSelectAll.checked;
+    for (const item of items) {
+      if (item.state === "pending") item.selected = checked;
+    }
+    refreshPendingSelections();
   });
 }
 
@@ -157,6 +170,7 @@ async function browse(prefix, cursor) {
     els.folderGrid.innerHTML = "";
     els.browserLoading.textContent = "Loading…";
     els.folderGrid.appendChild(els.browserLoading);
+    browserRenderedCount = 0;
   }
 
   renderBreadcrumb(prefix);
@@ -184,6 +198,8 @@ async function browse(prefix, cursor) {
       const tile = document.createElement("button");
       tile.className = "folder-tile";
       tile.title = folder.name;
+      tile.dataset.kind = "folder";
+      tile.dataset.name = folder.name.toLowerCase();
       tile.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1.5 2A1.5 1.5 0 000 3.5v9A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5V5a1.5 1.5 0 00-1.5-1.5H7.71L6.85 2.64A1.5 1.5 0 005.71 2H1.5z"/>
@@ -193,6 +209,7 @@ async function browse(prefix, cursor) {
       tile.querySelector("span").textContent = folder.name;
       tile.addEventListener("click", () => navigateTo(folder.prefix));
       els.folderGrid.appendChild(tile);
+      browserRenderedCount++;
     }
 
 
@@ -201,10 +218,13 @@ async function browse(prefix, cursor) {
       const entry = document.createElement("div");
       entry.className = "file-entry";
       entry.title = file.name;
+      entry.dataset.kind = "file";
+      entry.dataset.name = file.name.toLowerCase();
       entry.innerHTML = `<span class="fe-name"></span><span class="fe-size"></span>`;
       entry.querySelector(".fe-name").textContent = file.name;
       entry.querySelector(".fe-size").textContent = formatBytes(file.size);
       els.folderGrid.appendChild(entry);
+      browserRenderedCount++;
     }
 
 
@@ -219,11 +239,14 @@ async function browse(prefix, cursor) {
     // Pagination.
     if (data.truncated && data.cursor) {
       browseCursor = data.cursor;
+      els.loadMoreBtn.textContent = `Load more — ${browserRenderedCount} shown, more available`;
       els.browserMore.hidden = false;
     } else {
       browseCursor = null;
+      els.loadMoreBtn.textContent = "Load more";
       els.browserMore.hidden = true;
     }
+    applyBrowserFilter();
   } catch (err) {
     // Browse failure is non-fatal: uploads still work.
     if (!isAppend) {
@@ -332,6 +355,7 @@ function addFiles(fileList) {
       file,
       key,
       overwrite: els.overwrite.checked,
+      selected: false,
       state: "pending", // NOT "queued" — waits for explicit Upload click
       loaded: 0,
       uploadId: null,
@@ -357,7 +381,7 @@ function addFiles(fileList) {
 function startUpload() {
   let started = 0;
   for (const item of items) {
-    if (item.state === "pending") {
+    if (item.state === "pending" && item.selected) {
       item.state = "queued";
       update(item);
       started++;
@@ -619,19 +643,32 @@ function renderRow(item) {
   const li = document.createElement("li");
   li.className = "row";
   li.innerHTML = `
-    <div class="row-top">
-      <span class="name"></span>
-      <span class="size"></span>
+    <div class="row-main">
+      <label class="row-select" hidden>
+        <input type="checkbox" class="row-checkbox" />
+        <span class="sr-only">Select file</span>
+      </label>
+      <span class="row-select-spacer" hidden></span>
+      <div class="row-body">
+        <div class="row-top">
+          <span class="name"></span>
+          <span class="size"></span>
+        </div>
+        <div class="bar"><i></i></div>
+        <div class="row-bot">
+          <span class="state"></span>
+          <span class="actions"></span>
+        </div>
+        <p class="key" hidden></p>
+      </div>
     </div>
-    <div class="bar"><i></i></div>
-    <div class="row-bot">
-      <span class="state"></span>
-      <span class="actions"></span>
-    </div>
-    <p class="key" hidden></p>
   `;
   li.querySelector(".name").textContent = item.file.name;
   li.querySelector(".size").textContent = formatBytes(item.file.size);
+  li.querySelector(".row-checkbox").addEventListener("change", (e) => {
+    item.selected = e.target.checked;
+    refreshPendingSelections();
+  });
   els.list.appendChild(li);
   item.row = li;
   update(item);
@@ -684,7 +721,25 @@ function update(item) {
   }
 
   renderActions(item, li.querySelector(".actions"));
+  renderSelection(item, li);
   updateQueueVisibility();
+}
+
+function renderSelection(item, li) {
+  const selectWrap = li.querySelector(".row-select");
+  const spacer = li.querySelector(".row-select-spacer");
+  const checkbox = li.querySelector(".row-checkbox");
+  const isPending = item.state === "pending";
+
+  selectWrap.style.display = isPending ? "inline-flex" : "none";
+  spacer.style.display = isPending ? "none" : "block";
+  checkbox.disabled = !isPending;
+
+  if (isPending) {
+    checkbox.checked = item.selected === true;
+  } else {
+    checkbox.checked = false;
+  }
 }
 
 function renderActions(item, host) {
@@ -735,28 +790,49 @@ function updateQueueVisibility() {
   const hasItems = items.length > 0;
   els.queue.hidden = !hasItems;
 
-  const pendingCount = items.filter((i) => i.state === "pending").length;
-  const pendingSize = items
-    .filter((i) => i.state === "pending")
-    .reduce((sum, i) => sum + i.file.size, 0);
+  const pendingItems = items.filter((i) => i.state === "pending");
+  const pendingCount = pendingItems.length;
+  const pendingSize = pendingItems.reduce((sum, i) => sum + i.file.size, 0);
+  const selectedPending = pendingItems.filter((i) => i.selected !== false);
+  const selectedPendingCount = selectedPending.length;
+  const selectedPendingSize = selectedPending.reduce(
+    (sum, i) => sum + i.file.size,
+    0,
+  );
   const activeCount = items.filter(
     (i) => i.state === "queued" || i.state === "uploading",
   ).length;
   const doneCount = items.filter((i) => i.state === "done").length;
 
-  // Show Upload button only when there are pending files and nothing active.
-  els.uploadBtn.hidden = pendingCount === 0;
+  els.uploadBtn.hidden = selectedPendingCount === 0;
+
+  els.queueSelectAllWrap.hidden = pendingCount === 0;
+  if (pendingCount > 0) {
+    els.queueSelectAll.checked = selectedPendingCount === pendingCount;
+    els.queueSelectAll.indeterminate =
+      selectedPendingCount > 0 && selectedPendingCount < pendingCount;
+  } else {
+    els.queueSelectAll.checked = false;
+    els.queueSelectAll.indeterminate = false;
+  }
 
   // Build summary.
   const parts = [];
   if (pendingCount > 0) {
     parts.push(
-      `${pendingCount} file${pendingCount !== 1 ? "s" : ""} (${formatBytes(pendingSize)}) → ${currentPrefix || "/"}`,
+      `${selectedPendingCount} of ${pendingCount} selected (${formatBytes(selectedPendingSize)} of ${formatBytes(pendingSize)}) → ${currentPrefix || "/"}`,
     );
   }
   if (activeCount > 0) parts.push(`${activeCount} uploading`);
   if (doneCount > 0) parts.push(`${doneCount} done`);
   els.queueSummary.textContent = parts.join(" · ");
+}
+
+function refreshPendingSelections() {
+  for (const item of items) {
+    if (item.row) renderSelection(item, item.row);
+  }
+  updateQueueVisibility();
 }
 
 // =========================================================================
@@ -807,6 +883,30 @@ function clearFinished() {
     }
   }
   updateQueueVisibility();
+}
+
+function applyBrowserFilter() {
+  const term = els.browserSearch.value.trim().toLowerCase();
+  const nodes = Array.from(els.folderGrid.querySelectorAll("[data-kind]"));
+  let visibleCount = 0;
+
+  for (const node of nodes) {
+    const match = !term || node.dataset.name.includes(term);
+    node.hidden = !match;
+    if (match) visibleCount++;
+  }
+
+  let empty = els.folderGrid.querySelector(".browser-filter-empty");
+  if (term && nodes.length > 0 && visibleCount === 0) {
+    if (!empty) {
+      empty = document.createElement("p");
+      empty.className = "browser-filter-empty";
+      empty.textContent = "No matching folders or files in this folder.";
+      els.folderGrid.appendChild(empty);
+    }
+  } else {
+    empty?.remove();
+  }
 }
 
 // =========================================================================
