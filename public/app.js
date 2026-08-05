@@ -232,14 +232,14 @@ async function browse(prefix, cursor) {
     if (data.folders.length === 0 && data.files.length === 0 && !isAppend) {
       const empty = document.createElement("p");
       empty.className = "browser-empty";
-      empty.textContent = "Empty — upload files here or create a subfolder.";
+      empty.textContent = "Empty - upload files here or create a subfolder.";
       els.folderGrid.appendChild(empty);
     }
 
     // Pagination.
     if (data.truncated && data.cursor) {
       browseCursor = data.cursor;
-      els.loadMoreBtn.textContent = `Load more — ${browserRenderedCount} shown, more available`;
+      els.loadMoreBtn.textContent = `Load more - ${browserRenderedCount} shown, more available`;
       els.browserMore.hidden = false;
     } else {
       browseCursor = null;
@@ -379,6 +379,18 @@ function addFiles(fileList) {
 // =========================================================================
 
 function startUpload() {
+  const pendingItems = items.filter((item) => item.state === "pending");
+  if (pendingItems.length === 0) {
+    showBanner("Add files before uploading.", true);
+    return;
+  }
+
+  const selectedPending = pendingItems.filter((item) => item.selected === true);
+  if (selectedPending.length === 0) {
+    showBanner("Select at least one file to upload.", true);
+    return;
+  }
+
   let started = 0;
   for (const item of items) {
     if (item.state === "pending" && item.selected) {
@@ -793,7 +805,7 @@ function updateQueueVisibility() {
   const pendingItems = items.filter((i) => i.state === "pending");
   const pendingCount = pendingItems.length;
   const pendingSize = pendingItems.reduce((sum, i) => sum + i.file.size, 0);
-  const selectedPending = pendingItems.filter((i) => i.selected !== false);
+  const selectedPending = pendingItems.filter((i) => i.selected === true);
   const selectedPendingCount = selectedPending.length;
   const selectedPendingSize = selectedPending.reduce(
     (sum, i) => sum + i.file.size,
@@ -804,7 +816,8 @@ function updateQueueVisibility() {
   ).length;
   const doneCount = items.filter((i) => i.state === "done").length;
 
-  els.uploadBtn.hidden = selectedPendingCount === 0;
+  els.uploadBtn.hidden = false;
+  els.uploadBtn.disabled = false;
 
   els.queueSelectAllWrap.hidden = pendingCount === 0;
   if (pendingCount > 0) {
@@ -927,13 +940,16 @@ let bannerTimer;
 function showBanner(message, isError = false) {
   els.banner.textContent = message;
   els.banner.className = isError ? "banner error" : "banner";
+  els.banner.classList.remove("is-hiding");
   els.banner.hidden = false;
   clearTimeout(bannerTimer);
-  if (!isError) {
-    bannerTimer = setTimeout(() => {
+  bannerTimer = setTimeout(() => {
+    els.banner.classList.add("is-hiding");
+    setTimeout(() => {
       els.banner.hidden = true;
-    }, 4000);
-  }
+      els.banner.classList.remove("is-hiding");
+    }, 300);
+  }, 5000);
 }
 
 function formatBytes(bytes) {

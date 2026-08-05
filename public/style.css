@@ -646,6 +646,12 @@ body {
   border-color: var(--border);
 }
 .btn:active { transform: scale(0.98); }
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
 
 .btn-sm { padding: 4px 10px; font-size: 0.78rem; }
 
@@ -687,7 +693,14 @@ body {
   z-index: 100;
   max-width: 90vw;
   text-align: center;
+  opacity: 1;
+  transition: opacity 0.3s ease;
 }
+
+.banner.is-hiding {
+  opacity: 0;
+}
+
 .banner.error {
   background: var(--error-bg);
   color: var(--error);
