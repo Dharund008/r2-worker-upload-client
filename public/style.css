@@ -312,6 +312,8 @@ body {
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 8px;
   min-height: 44px;
+  max-height: 50vh;
+  overflow-y: auto;
 }
 
 .folder-tile {
