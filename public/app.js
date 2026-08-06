@@ -900,6 +900,7 @@ function clearFinished() {
 
 function applyBrowserFilter() {
   const term = els.browserSearch.value.trim().toLowerCase();
+  els.folderGrid.querySelector(".browser-filter-empty")?.remove();
   const nodes = Array.from(els.folderGrid.querySelectorAll("[data-kind]"));
   let visibleCount = 0;
 
@@ -909,16 +910,11 @@ function applyBrowserFilter() {
     if (match) visibleCount++;
   }
 
-  let empty = els.folderGrid.querySelector(".browser-filter-empty");
   if (term && nodes.length > 0 && visibleCount === 0) {
-    if (!empty) {
-      empty = document.createElement("p");
-      empty.className = "browser-filter-empty";
-      empty.textContent = "No matching folders or files in this folder.";
-      els.folderGrid.appendChild(empty);
-    }
-  } else {
-    empty?.remove();
+    const empty = document.createElement("p");
+    empty.className = "browser-filter-empty";
+    empty.textContent = "No matching folders or files in this folder.";
+    els.folderGrid.appendChild(empty);
   }
 }
 
