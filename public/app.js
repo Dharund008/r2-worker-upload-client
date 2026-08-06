@@ -52,9 +52,14 @@ let config = {
 
 // Current browse path (full R2 prefix, e.g. "uploads/sample/")
 let currentPrefix = "";
-let browseCursor = null;
 let browseLoading = false;
-let browserRenderedCount = 0;
+
+// Full-fetch browse: all items in the current folder are loaded into memory
+// on entry, then rendered in client-side batches for instant paging & search.
+const BROWSE_PAGE_SIZE = 3;
+let allFolders = []; // { name, prefix }
+let allFiles = [];   // { name, size }
+let displayedCount = 0;
 
 const items = []; // upload records
 let pumping = false; // one file at a time
@@ -93,7 +98,7 @@ async function init() {
 
   // Start browsing at the configured prefix root (or bucket root).
   currentPrefix = config.uploadPrefix || "";
-  browse(currentPrefix);
+  loadFolder(currentPrefix);
 }
 
 // =========================================================================
@@ -118,7 +123,7 @@ function initTheme() {
 
 function wireBrowser() {
   els.loadMoreBtn.addEventListener("click", () => {
-    if (browseCursor) browse(currentPrefix, browseCursor);
+    renderBatch(true);
   });
   els.browserSearch.addEventListener("input", applyBrowserFilter);
 
@@ -157,108 +162,144 @@ function createAndEnterFolder() {
 
 function navigateTo(prefix) {
   currentPrefix = prefix;
-  browseCursor = null;
-  browse(prefix);
+  loadFolder(prefix);
 }
 
-async function browse(prefix, cursor) {
+// ---- Full-fetch: load every page of a folder into memory, then render ----
+
+async function loadFolder(prefix) {
   if (browseLoading) return;
   browseLoading = true;
 
-  const isAppend = !!cursor;
-  if (!isAppend) {
-    els.folderGrid.innerHTML = "";
-    els.browserLoading.textContent = "Loading…";
-    els.folderGrid.appendChild(els.browserLoading);
-    browserRenderedCount = 0;
-  }
+  // Reset in-memory dataset.
+  allFolders = [];
+  allFiles = [];
+  displayedCount = 0;
+
+  els.folderGrid.innerHTML = "";
+  els.browserLoading.textContent = "Loading…";
+  els.folderGrid.appendChild(els.browserLoading);
+  els.browserMore.hidden = true;
+  els.browserSearch.value = "";
 
   renderBreadcrumb(prefix);
-  els.browserMore.hidden = true;
 
   try {
-    const params = new URLSearchParams({ prefix });
-    if (cursor) params.set("cursor", cursor);
+    let cursor = null;
+    do {
+      const params = new URLSearchParams({ prefix });
+      if (cursor) params.set("cursor", cursor);
 
-    const res = await fetch(`/api/browse?${params}`);
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.error || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
+      const res = await fetch(`/api/browse?${params}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
 
-    if (!isAppend) {
-      els.folderGrid.innerHTML = "";
-    } else {
-      els.browserLoading.remove();
-    }
+      for (const f of data.folders) allFolders.push(f);
+      for (const f of data.files) allFiles.push(f);
 
-    // Render folders.
-    for (const folder of data.folders) {
+      const total = allFolders.length + allFiles.length;
+      els.browserLoading.textContent = `Loading… ${total.toLocaleString()} items`;
+
+      cursor = data.truncated ? data.cursor : null;
+    } while (cursor);
+
+    // All pages fetched — render the first batch.
+    els.folderGrid.innerHTML = "";
+    renderBatch(false);
+  } catch (err) {
+    els.folderGrid.innerHTML = "";
+    const msg = document.createElement("p");
+    msg.className = "browser-empty";
+    msg.textContent = "Could not load folder contents. You can still upload files.";
+    els.folderGrid.appendChild(msg);
+    console.error("Browse error:", err);
+  } finally {
+    browseLoading = false;
+  }
+}
+
+// ---- Render a batch of items from the in-memory arrays ----
+
+function renderBatch(append) {
+  if (!append) {
+    els.folderGrid.innerHTML = "";
+    displayedCount = 0;
+  }
+
+  const term = els.browserSearch.value.trim().toLowerCase();
+  const filteredFolders = term
+    ? allFolders.filter((f) => f.name.toLowerCase().includes(term))
+    : allFolders;
+  const filteredFiles = term
+    ? allFiles.filter((f) => f.name.toLowerCase().includes(term))
+    : allFiles;
+  const totalFiltered = filteredFolders.length + filteredFiles.length;
+
+  // Determine the slice to render this batch.
+  const start = displayedCount;
+  const end = Math.min(start + BROWSE_PAGE_SIZE, totalFiltered);
+
+  // Combined list: folders first, then files (matching current order).
+  const combined = [...filteredFolders, ...filteredFiles];
+  const batch = combined.slice(start, end);
+
+  for (const item of batch) {
+    if (item.prefix !== undefined) {
+      // It's a folder.
       const tile = document.createElement("button");
       tile.className = "folder-tile";
-      tile.title = folder.name;
+      tile.title = item.name;
       tile.dataset.kind = "folder";
-      tile.dataset.name = folder.name.toLowerCase();
+      tile.dataset.name = item.name.toLowerCase();
       tile.innerHTML = `
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1.5 2A1.5 1.5 0 000 3.5v9A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5V5a1.5 1.5 0 00-1.5-1.5H7.71L6.85 2.64A1.5 1.5 0 005.71 2H1.5z"/>
         </svg>
         <span></span>
       `;
-      tile.querySelector("span").textContent = folder.name;
-      tile.addEventListener("click", () => navigateTo(folder.prefix));
+      tile.querySelector("span").textContent = item.name;
+      tile.addEventListener("click", () => navigateTo(item.prefix));
       els.folderGrid.appendChild(tile);
-      browserRenderedCount++;
-    }
-
-
-    // Render files.
-    for (const file of data.files) {
+    } else {
+      // It's a file.
       const entry = document.createElement("div");
       entry.className = "file-entry";
-      entry.title = file.name;
+      entry.title = item.name;
       entry.dataset.kind = "file";
-      entry.dataset.name = file.name.toLowerCase();
+      entry.dataset.name = item.name.toLowerCase();
       entry.innerHTML = `<span class="fe-name"></span><span class="fe-size"></span>`;
-      entry.querySelector(".fe-name").textContent = file.name;
-      entry.querySelector(".fe-size").textContent = formatBytes(file.size);
+      entry.querySelector(".fe-name").textContent = item.name;
+      entry.querySelector(".fe-size").textContent = formatBytes(item.size);
       els.folderGrid.appendChild(entry);
-      browserRenderedCount++;
     }
+  }
 
+  displayedCount = end;
 
-    // Empty state.
-    if (data.folders.length === 0 && data.files.length === 0 && !isAppend) {
-      const empty = document.createElement("p");
-      empty.className = "browser-empty";
-      empty.textContent = "Empty - upload files here or create a subfolder.";
-      els.folderGrid.appendChild(empty);
-    }
+  // Empty state.
+  if (totalFiltered === 0 && allFolders.length === 0 && allFiles.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "browser-empty";
+    empty.textContent = "Empty - upload files here or create a subfolder.";
+    els.folderGrid.appendChild(empty);
+  } else if (totalFiltered === 0 && (allFolders.length > 0 || allFiles.length > 0)) {
+    // Search active but no matches.
+    const empty = document.createElement("p");
+    empty.className = "browser-filter-empty";
+    empty.textContent = "No matching folders or files in this folder.";
+    els.folderGrid.appendChild(empty);
+  }
 
-    // Pagination.
-    if (data.truncated && data.cursor) {
-      browseCursor = data.cursor;
-      els.loadMoreBtn.textContent = `Load more - ${browserRenderedCount} shown, more available`;
-      els.browserMore.hidden = false;
-    } else {
-      browseCursor = null;
-      els.loadMoreBtn.textContent = "Load more";
-      els.browserMore.hidden = true;
-    }
-    applyBrowserFilter();
-  } catch (err) {
-    // Browse failure is non-fatal: uploads still work.
-    if (!isAppend) {
-      els.folderGrid.innerHTML = "";
-      const msg = document.createElement("p");
-      msg.className = "browser-empty";
-      msg.textContent = `Could not load folder contents. You can still upload files.`;
-      els.folderGrid.appendChild(msg);
-    }
-    console.error("Browse error:", err);
-  } finally {
-    browseLoading = false;
+  // "Load more" button — purely client-side now.
+  if (displayedCount < totalFiltered) {
+    const remaining = totalFiltered - displayedCount;
+    els.loadMoreBtn.textContent = `Showing ${displayedCount} of ${totalFiltered} — load ${Math.min(BROWSE_PAGE_SIZE, remaining)} more`;
+    els.browserMore.hidden = false;
+  } else {
+    els.browserMore.hidden = true;
   }
 }
 
@@ -422,7 +463,7 @@ async function pump() {
     pumping = false;
     updateQueueVisibility();
     // Refresh browser to show newly uploaded files.
-    browse(currentPrefix);
+    loadFolder(currentPrefix);
   }
 }
 
@@ -899,23 +940,9 @@ function clearFinished() {
 }
 
 function applyBrowserFilter() {
-  const term = els.browserSearch.value.trim().toLowerCase();
-  els.folderGrid.querySelector(".browser-filter-empty")?.remove();
-  const nodes = Array.from(els.folderGrid.querySelectorAll("[data-kind]"));
-  let visibleCount = 0;
-
-  for (const node of nodes) {
-    const match = !term || node.dataset.name.includes(term);
-    node.hidden = !match;
-    if (match) visibleCount++;
-  }
-
-  if (term && nodes.length > 0 && visibleCount === 0) {
-    const empty = document.createElement("p");
-    empty.className = "browser-filter-empty";
-    empty.textContent = "No matching folders or files in this folder.";
-    els.folderGrid.appendChild(empty);
-  }
+  // Re-render the grid from the full in-memory dataset, filtered by the
+  // current search term. This makes search exhaustive across all items.
+  renderBatch(false);
 }
 
 // =========================================================================

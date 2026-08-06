@@ -22,7 +22,7 @@ const PART_SIZE = 50 * 1024 * 1024;
 const SINGLE_PUT_MAX = PART_SIZE;
 
 // R2 list() returns at most 1000 keys per call.
-const BROWSE_PAGE_SIZE = 3;
+const BROWSE_PAGE_SIZE = 1000;
 
 export default {
   async fetch(request, env, ctx) {
