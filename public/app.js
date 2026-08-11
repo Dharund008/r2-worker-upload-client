@@ -28,7 +28,6 @@ const els = {
   // Upload
   dropzone: document.getElementById("dropzone"),
   fileInput: document.getElementById("file-input"),
-  overwrite: document.getElementById("overwrite"),
   // Queue
   queue: document.getElementById("queue"),
   queueSelectAllWrap: document.getElementById("queue-select-all-wrap"),
@@ -395,7 +394,7 @@ function addFiles(fileList) {
       id: `u${items.length}-${Date.now()}`,
       file,
       key,
-      overwrite: els.overwrite.checked,
+      overwrite: false,
       selected: false,
       state: "pending", // NOT "queued" — waits for explicit Upload click
       loaded: 0,
