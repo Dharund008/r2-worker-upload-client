@@ -311,7 +311,7 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
   gap: 8px;
-  min-height: 44px;
+  min-height: 60px;
   max-height: 240px;
   overflow-y: auto;
 }
@@ -327,6 +327,7 @@ body {
   cursor: pointer;
   font-size: 0.85rem;
   color: var(--text);
+  min-height: 60px;
   transition: background var(--transition), border-color var(--transition);
 }
 .folder-tile:hover {
@@ -336,10 +337,11 @@ body {
 .folder-tile svg { flex-shrink: 0; color: var(--text-tertiary); }
 
 .folder-tile span {
-  overflow: hidden;
+  word-break: break-word;
+  /* overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0;
+  min-width: 0; */
 }
 
 .file-entry {
@@ -353,11 +355,14 @@ body {
   padding: 6px 12px;
   font-size: 0.82rem;
   color: var(--text-secondary);
+  min-width: 0;
+  min-height: 60px;
 }
 .file-entry .fe-name {
-  overflow: hidden;
+  word-break: break-word;
+  /* overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: nowrap; */
   min-width: 0;
 }
 .file-entry .fe-size {
@@ -448,16 +453,6 @@ body {
 .dropzone strong { color: var(--text); }
 .hint { color: var(--text-tertiary); font-size: 0.82rem; }
 
-.overwrite-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  cursor: pointer;
-}
-.overwrite-label input[type="checkbox"] { accent-color: var(--accent); }
 
 /* ------------------------------------------------------------------ */
 /* Queue / file list                                                  */
