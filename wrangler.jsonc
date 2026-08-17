@@ -3,6 +3,7 @@
   "name": "ap-r2-upload-client",
   "main": "src/index.js",
   "compatibility_date": "2026-08-05",
+  "preview_urls": false,
 
   // R2 bucket uploads land in. Add "remote": true to hit the real bucket from
   // `wrangler dev` instead of local storage.
@@ -26,13 +27,20 @@
     // Fill in after enabling Access on the Worker.
     "TEAM_DOMAIN": "https://restless-night-6892.cloudflareaccess.com",
     // The Access application's Audience (AUD) tag.
-    "POLICY_AUD": "",
+    "POLICY_AUD": "c5476c16df2a5ee3abf7992749255d2929ed4ba559b73655a81e2c2d39e1c682",
     // Optional: confine all uploads under this prefix. Set to "" to allow
     // uploads anywhere in the bucket (bucket-wide browsing and upload).
     "UPLOAD_PREFIX": "",
     // MUST be "true" in production. "false" only for local `wrangler dev`,
     // where no Access JWT exists.
-    "REQUIRE_ACCESS": "true"
+    "REQUIRE_ACCESS": "true",
+    // Per-engagement UI chrome. CUSTOMER_NAME is the header kicker; hide when "".
+    "CUSTOMER_NAME": "Associated Press",
+    // Display name for the bucket (binding does not expose bucket_name at runtime).
+    "BUCKET_LABEL": "demo-services",
+    // Optional public origin for uploaded objects, e.g. "https://cdn.example.com"
+    // or "https://pub-xxx.r2.dev". Empty = private; UI copies the full key instead.
+    "PUBLIC_BASE_URL": "https://download.apmultimedianewsroom.com"
   },
 
   "observability": {
@@ -57,7 +65,10 @@
         "TEAM_DOMAIN": "",
         "POLICY_AUD": "",
         "UPLOAD_PREFIX": "",
-        "REQUIRE_ACCESS": "true"
+        "REQUIRE_ACCESS": "true",
+        "CUSTOMER_NAME": "",
+        "BUCKET_LABEL": "CHANGEME-prod",
+        "PUBLIC_BASE_URL": ""
       },
       "observability": {
         "enabled": true
