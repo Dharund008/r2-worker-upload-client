@@ -96,7 +96,7 @@ async function init() {
   try {
     const res = await fetch("/api/config");
     if (res.status === 403) {
-      showBanner("Your session has expired. Reload the page to sign in again.", true);
+      showBanner("Your session has expired. Reload the page to sign in again.", "error");
       return;
     }
     if (res.ok) {
@@ -194,7 +194,7 @@ function createAndEnterFolder() {
 
   // Basic validation: no path traversal, no control chars.
   if (/[\\]/.test(raw) || /\.\./.test(raw) || /[\x00-\x1f\x7f]/.test(raw)) {
-    showBanner("Invalid folder name.", true);
+    showBanner("Invalid folder name.", "error");
     return;
   }
 
@@ -327,22 +327,31 @@ function renderBatch(append) {
       entry.dataset.kind = "file";
       entry.dataset.name = item.name.toLowerCase();
 
-      const copyLabel = hasPublicUrl() ? "Source URL" : "Copy key";
+      const copyTitle = hasPublicUrl() ? "Copy source URL" : "Copy key";
+      const copySvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+      const checkSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
       entry.innerHTML = `
         <span class="fe-icon"><svg width="14" height="16" viewBox="0 0 14 16" fill="currentColor">
           <path d="M8.5 0H1.5A1.5 1.5 0 000 1.5v13A1.5 1.5 0 001.5 16h11a1.5 1.5 0 001.5-1.5V5.5L8.5 0zM9 1.5L12.5 5H9.5A.5.5 0 019 4.5V1.5zM1.5 15a.5.5 0 01-.5-.5v-13a.5.5 0 01.5-.5H8v4.5A1.5 1.5 0 009.5 6H13v8.5a.5.5 0 01-.5.5h-11z"/>
         </svg></span>
         <span class="fe-name"></span>
         <span class="fe-size"></span>
-        <button class="btn btn-sm fe-copy" title="${copyLabel}">${copyLabel}</button>
+        <button class="fe-copy" title="${copyTitle}">${copySvg}</button>
       `;
       entry.querySelector(".fe-name").textContent = item.name;
       entry.querySelector(".fe-size").textContent = formatBytes(item.size);
-      entry.querySelector(".fe-copy").addEventListener("click", (e) => {
+      const copyBtn = entry.querySelector(".fe-copy");
+      copyBtn.addEventListener("click", (e) => {
         e.stopPropagation();
         const value = objectHref(item.key);
         navigator.clipboard.writeText(value).then(() => {
-          showBanner(`Copied: ${value}`);
+          copyBtn.innerHTML = checkSvg;
+          copyBtn.style.color = "var(--success)";
+          showBanner(`Copied: ${value}`, "success");
+          setTimeout(() => {
+            copyBtn.innerHTML = copySvg;
+            copyBtn.style.color = "";
+          }, 2000);
         });
       });
       els.folderGrid.appendChild(entry);
@@ -495,13 +504,13 @@ function addFiles(fileList) {
 function startUpload() {
   const pendingItems = items.filter((item) => item.state === "pending");
   if (pendingItems.length === 0) {
-    showBanner("Add files before uploading.", true);
+    showBanner("Add files before uploading.", "error");
     return;
   }
 
   const selectedPending = pendingItems.filter((item) => item.selected === true);
   if (selectedPending.length === 0) {
-    showBanner("Select at least one file to upload.", true);
+    showBanner("Select at least one file to upload.", "error");
     return;
   }
 
@@ -833,7 +842,7 @@ async function parseResponse(res, preParsed) {
   if (res.status === 403 || res.status === 401) {
     const err = new Error("Your session has expired - reload the page to sign in again.");
     err.fatal = true;
-    showBanner(err.message, true);
+    showBanner(err.message, "error");
     throw err;
   }
 
@@ -1012,9 +1021,9 @@ function renderActions(item, host) {
     add(label, async () => {
       try {
         await navigator.clipboard.writeText(value);
-        showBanner(`Copied ${value}`);
+        showBanner(`Copied ${value}`, "success");
       } catch {
-        showBanner("Could not copy to clipboard.", true);
+        showBanner("Could not copy to clipboard.", "error");
       }
     });
   }
@@ -1269,9 +1278,11 @@ function warnIfActive(event) {
 }
 
 let bannerTimer;
-function showBanner(message, isError = false) {
+function showBanner(message, variant = "") {
   els.banner.textContent = message;
-  els.banner.className = isError ? "banner error" : "banner";
+  els.banner.className = variant === "error" ? "banner error"
+    : variant === "success" ? "banner success"
+    : "banner";
   els.banner.classList.remove("is-hiding");
   els.banner.hidden = false;
   clearTimeout(bannerTimer);
