@@ -314,80 +314,136 @@ body {
 .crumb-sep { color: var(--text-tertiary); font-size: 0.75rem; user-select: none; }
 
 .folder-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 8px;
-  min-height: 60px;
-  max-height: 240px;
+  display: flex;
+  flex-direction: column;
+  min-height: 40px;
+  max-height: 280px;
   overflow-y: auto;
 }
 
+/* List header */
+.browse-list-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-tertiary);
+  border-bottom: 1px solid var(--border-subtle);
+  user-select: none;
+}
+.blh-icon { width: 20px; flex-shrink: 0; }
+.blh-name { flex: 1; min-width: 0; }
+.blh-size { width: 72px; flex-shrink: 0; text-align: right; }
+.blh-action { width: 72px; flex-shrink: 0; }
+
+/* Folder rows */
 .folder-tile {
   display: flex;
   align-items: center;
   gap: 8px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 8px 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 8px 10px;
   cursor: pointer;
   font-size: 0.85rem;
   color: var(--text);
-  min-height: 60px;
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--transition);
+  text-align: left;
 }
 .folder-tile:hover {
   background: var(--bg-hover);
-  border-color: var(--border);
 }
-.folder-tile svg { flex-shrink: 0; color: var(--text-tertiary); width: 20px; height: 20px; }
-.folder-tile span { font-weight: 500; }
-
-.folder-tile span {
-  word-break: break-word;
-  /* overflow: hidden;
+.ft-icon {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+.ft-icon svg { width: 16px; height: 16px; }
+.ft-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  min-width: 0; */
+}
+.ft-meta {
+  width: 72px;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--text-tertiary);
+  font-size: 0.78rem;
 }
 
+/* File rows */
 .file-entry {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  background: var(--bg-raised);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
-  font-size: 0.82rem;
-  color: var(--text-secondary);
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  padding: 5px 10px;
+  font-size: 0.85rem;
+  color: var(--text);
   min-width: 0;
-  min-height: 60px;
+  transition: background var(--transition);
 }
+.file-entry:hover {
+  background: var(--bg-hover);
+}
+.fe-icon {
+  width: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-tertiary);
+}
+.fe-icon svg { width: 14px; height: 16px; }
 .file-entry .fe-name {
-  word-break: break-word;
-  /* overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap; */
+  flex: 1;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .file-entry .fe-size {
+  width: 72px;
   flex-shrink: 0;
+  text-align: right;
   font-family: var(--mono);
   font-size: 0.75rem;
   color: var(--text-tertiary);
 }
+.fe-copy {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.75rem;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
 
 .browser-empty {
-  grid-column: 1 / -1;
   text-align: center;
   color: var(--text-tertiary);
   font-size: 0.85rem;
   padding: 12px 0;
 }
 .browser-loading {
-  grid-column: 1 / -1;
   text-align: center;
   color: var(--text-tertiary);
   font-size: 0.85rem;
@@ -400,7 +456,6 @@ body {
 }
 
 .browser-filter-empty {
-  grid-column: 1 / -1;
   text-align: center;
   color: var(--text-tertiary);
   font-size: 0.85rem;
@@ -854,6 +909,7 @@ body {
 @media (max-width: 520px) {
   .shell { padding: 20px 16px 48px; }
   .header { flex-direction: column; gap: 8px; }
-  .folder-grid { grid-template-columns: 1fr 1fr; }
   .queue-header { flex-direction: column; align-items: flex-start; }
+  .blh-action, .ft-meta { display: none; }
+  .fe-copy { width: auto; }
 }
