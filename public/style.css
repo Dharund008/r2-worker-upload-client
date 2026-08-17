@@ -337,8 +337,8 @@ body {
 }
 .blh-icon { width: 20px; flex-shrink: 0; }
 .blh-name { flex: 1; min-width: 0; }
-.blh-size { width: 72px; flex-shrink: 0; text-align: right; }
-.blh-action { width: 72px; flex-shrink: 0; }
+.blh-size { width: 80px; flex-shrink: 0; text-align: right; padding-right: 12px; }
+.blh-action { width: 28px; flex-shrink: 0; }
 
 /* Folder rows */
 .folder-tile {
@@ -377,7 +377,7 @@ body {
   white-space: nowrap;
 }
 .ft-meta {
-  width: 72px;
+  width: 108px;
   flex-shrink: 0;
   text-align: right;
   color: var(--text-tertiary);
@@ -419,21 +419,31 @@ body {
   white-space: nowrap;
 }
 .file-entry .fe-size {
-  width: 72px;
+  width: 80px;
   flex-shrink: 0;
   text-align: right;
+  padding-right: 12px;
   font-family: var(--mono);
   font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);
 }
 .fe-copy {
+  width: 28px;
   flex-shrink: 0;
   background: none;
   border: none;
-  color: var(--accent);
-  font-size: 0.75rem;
+  color: var(--text-tertiary);
   cursor: pointer;
-  padding: 2px 4px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition);
+}
+.fe-copy:hover {
+  color: var(--accent);
 }
 
 
@@ -783,7 +793,15 @@ body {
 .banner.error {
   background: var(--error-bg);
   color: var(--error);
-  border-color: var(--error);
+  border: none;
+  border-left: 3px solid var(--error);
+}
+
+.banner.success {
+  background: var(--done-bg);
+  color: var(--success);
+  border: none;
+  border-left: 3px solid var(--success);
 }
 
 /* ------------------------------------------------------------------ */
@@ -897,6 +915,10 @@ body {
 /* ------------------------------------------------------------------ */
 /* Responsive                                                         */
 /* ------------------------------------------------------------------ */
+
+@media (max-width: 780px) {
+  .shell { padding: 32px 20px 56px; }
+}
 
 @media (max-width: 640px) {
   .browser-search {
