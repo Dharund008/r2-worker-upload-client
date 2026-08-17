@@ -1,8 +1,8 @@
 // Browser side of the R2 upload client.
 //
 // The file never passes through the page's memory in full: File.slice() returns a
-// lazy Blob view, and each slice is handed straight to fetch() as the request body.
-// That is what lets a 65 GB file upload from a tab without exhausting memory.
+// lazy Blob view, and each slice is handed straight to fetch()/XHR as the request
+// body. That is what lets a 65 GB file upload from a tab without exhausting memory.
 
 const PART_CONCURRENCY = 3; // parts in flight within one file
 const MAX_PART_ATTEMPTS = 3; // per part, before the file is marked failed
@@ -13,6 +13,7 @@ const THEME_KEY = "r2-upload-theme";
 // =========================================================================
 
 const els = {
+  brandKicker: document.getElementById("brand-kicker"),
   bucketNote: document.getElementById("bucket-note"),
   sizeHint: document.getElementById("size-hint"),
   themeSelect: document.getElementById("theme-select"),
@@ -37,6 +38,17 @@ const els = {
   clearDone: document.getElementById("clear-done"),
   list: document.getElementById("file-list"),
   banner: document.getElementById("banner"),
+  // Modal
+  modalOverlay: document.getElementById("modal-overlay"),
+  modalTitle: document.getElementById("modal-title"),
+  modalBody: document.getElementById("modal-body"),
+  modalInputWrap: document.getElementById("modal-input-wrap"),
+  modalInput: document.getElementById("modal-input"),
+  modalCancel: document.getElementById("modal-cancel"),
+  modalConfirm: document.getElementById("modal-confirm"),
+  modalCheckboxWrap: document.getElementById("modal-checkbox-wrap"),
+  modalCheckbox: document.getElementById("modal-checkbox"),
+  modalCheckboxLabel: document.getElementById("modal-checkbox-label"),
 };
 
 // =========================================================================
@@ -47,6 +59,10 @@ let config = {
   partSize: 50 * 1024 * 1024,
   singlePutMax: 50 * 1024 * 1024,
   uploadPrefix: "",
+  customerName: "",
+  bucketLabel: "",
+  publicBaseUrl: "",
+  email: "",
 };
 
 // Current browse path (full R2 prefix, e.g. "uploads/sample/")
@@ -55,7 +71,7 @@ let browseLoading = false;
 
 // Full-fetch browse: all items in the current folder are loaded into memory
 // on entry, then rendered in client-side batches for instant paging & search.
-const BROWSE_PAGE_SIZE = 3;
+const BROWSE_PAGE_SIZE = 50;
 let allFolders = []; // { name, prefix }
 let allFiles = [];   // { name, size }
 let displayedCount = 0;
@@ -84,12 +100,10 @@ async function init() {
       return;
     }
     if (res.ok) {
-      config = await res.json();
+      config = { ...config, ...(await res.json()) };
       els.sizeHint.textContent =
         `Files over ${formatBytes(config.singlePutMax)} are uploaded in ${formatBytes(config.partSize)} parts.`;
-      if (config.email) {
-        els.bucketNote.textContent = `R2 as ${config.email}`;
-      }
+      applyChrome();
     }
   } catch {
     // Non-fatal: defaults are already sane. Real errors surface on upload.
@@ -98,6 +112,40 @@ async function init() {
   // Start browsing at the configured prefix root (or bucket root).
   currentPrefix = config.uploadPrefix || "";
   loadFolder(currentPrefix);
+}
+
+function applyChrome() {
+  const name = (config.customerName || "").trim();
+  if (name) {
+    els.brandKicker.textContent = name;
+    els.brandKicker.hidden = false;
+  } else {
+    els.brandKicker.textContent = "";
+    els.brandKicker.hidden = true;
+  }
+
+  const label = (config.bucketLabel || "").trim() || "R2";
+  if (config.email) {
+    els.bucketNote.textContent = `${label} as ${config.email}`;
+  } else {
+    els.bucketNote.textContent = label;
+  }
+}
+
+/** Public URL when PUBLIC_BASE_URL is set; otherwise the full R2 key. */
+function objectHref(key) {
+  if (!key) return "";
+  const base = (config.publicBaseUrl || "").replace(/\/+$/, "");
+  if (!base) return key;
+  const encoded = key
+    .split("/")
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
+  return `${base}/${encoded}`;
+}
+
+function hasPublicUrl() {
+  return Boolean((config.publicBaseUrl || "").trim());
 }
 
 // =========================================================================
@@ -295,7 +343,7 @@ function renderBatch(append) {
   // "Load more" button — purely client-side now.
   if (displayedCount < totalFiltered) {
     const remaining = totalFiltered - displayedCount;
-    els.loadMoreBtn.textContent = `Showing ${displayedCount} of ${totalFiltered} — load ${Math.min(BROWSE_PAGE_SIZE, remaining)} more`;
+    els.loadMoreBtn.textContent = `Showing ${displayedCount} of ${totalFiltered} - load ${Math.min(BROWSE_PAGE_SIZE, remaining)} more`;
     els.browserMore.hidden = false;
   } else {
     els.browserMore.hidden = true;
@@ -405,6 +453,7 @@ function addFiles(fileList) {
       finalKey: null,
       message: "",
       conflict: null,
+      storedAfterCancel: false,
       row: null,
     };
     items.push(item);
@@ -470,6 +519,7 @@ async function runUpload(item) {
   item.state = "uploading";
   item.loaded = 0;
   item.cancelled = false;
+  item.storedAfterCancel = false;
   item.startedAt = Date.now();
   update(item);
 
@@ -479,15 +529,16 @@ async function runUpload(item) {
     } else {
       await uploadMultipart(item);
     }
-    if (item.cancelled) return;
+    if (item.cancelled) {
+      await resolveCancelOutcome(item);
+      return;
+    }
     item.state = "done";
     item.loaded = item.file.size;
     update(item);
   } catch (err) {
     if (item.cancelled) {
-      item.state = "cancelled";
-      item.message = "Cancelled";
-      update(item);
+      await resolveCancelOutcome(item);
       return;
     }
     item.state = err.conflict ? "conflict" : "error";
@@ -499,27 +550,114 @@ async function runUpload(item) {
   }
 }
 
+/**
+ * After an in-flight cancel, one HEAD tells whether the object actually landed.
+ * Queued/never-started cancels skip this (no network yet).
+ */
+async function resolveCancelOutcome(item) {
+  const key = item.finalKey || item.key;
+  item.state = "cancelled";
+
+  if (!key) {
+    item.message = "Cancelled";
+    update(item);
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({ key });
+    const res = await fetch(`/api/head?${params}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.exists) {
+        item.finalKey = data.key || key;
+        item.storedAfterCancel = true;
+        item.message = `Cancelled — object is stored at ${objectHref(item.finalKey)}`;
+        update(item);
+        return;
+      }
+    }
+  } catch {
+    // Fall through to "nothing stored" if HEAD fails.
+  }
+
+  item.storedAfterCancel = false;
+  item.message = "Cancelled — nothing stored.";
+  update(item);
+}
+
 // =========================================================================
-// Single-shot upload
+// Single-shot upload (XHR for upload progress)
 // =========================================================================
 
 async function uploadSingle(item) {
   const params = new URLSearchParams({ key: item.key });
   if (item.overwrite) params.set("overwrite", "true");
 
-  const controller = new AbortController();
-  item.controllers.add(controller);
+  const headers = {};
+  if (item.file.type) headers["Content-Type"] = item.file.type;
 
-  const res = await fetch(`/api/upload/single?${params}`, {
-    method: "PUT",
-    body: item.file,
-    headers: item.file.type ? { "Content-Type": item.file.type } : undefined,
-    signal: controller.signal,
-  });
+  const data = await xhrPut(`/api/upload/single?${params}`, item.file, item, headers);
 
-  const data = await parseResponse(res);
   item.finalKey = data.key;
   item.loaded = item.file.size;
+}
+
+/**
+ * PUT with upload progress. Controllers hold AbortController-like objects;
+ * XHR itself exposes .abort(), so it can live in the same Set.
+ */
+function xhrPut(url, body, item, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    item.controllers.add(xhr);
+
+    xhr.open("PUT", url);
+    for (const [name, value] of Object.entries(headers)) {
+      if (value) xhr.setRequestHeader(name, value);
+    }
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+      item.loaded = event.loaded;
+      update(item);
+    };
+
+    xhr.onload = () => {
+      item.controllers.delete(xhr);
+      const raw = xhr.responseText || "";
+      let parsed = {};
+      try {
+        parsed = raw ? JSON.parse(raw) : {};
+      } catch {
+        parsed = {};
+      }
+
+      const fakeRes = {
+        ok: xhr.status >= 200 && xhr.status < 300,
+        status: xhr.status,
+        statusText: xhr.statusText,
+        json: async () => parsed,
+      };
+
+      parseResponse(fakeRes, parsed)
+        .then(resolve)
+        .catch(reject);
+    };
+
+    xhr.onerror = () => {
+      item.controllers.delete(xhr);
+      reject(new Error("Network error during upload"));
+    };
+
+    xhr.onabort = () => {
+      item.controllers.delete(xhr);
+      const err = new Error("Cancelled");
+      reject(err);
+    };
+
+    xhr.send(body);
+  });
 }
 
 // =========================================================================
@@ -647,21 +785,24 @@ async function abortUpload(item) {
 // Response parsing
 // =========================================================================
 
-async function parseResponse(res) {
+async function parseResponse(res, preParsed) {
   if (res.ok) {
     if (res.status === 204) return {};
     try {
-      return await res.json();
+      return preParsed !== undefined ? preParsed : await res.json();
     } catch {
       return {};
     }
   }
 
-  let body = {};
-  try {
-    body = await res.json();
-  } catch {
-    // Non-JSON error.
+  let body = preParsed;
+  if (body === undefined) {
+    body = {};
+    try {
+      body = await res.json();
+    } catch {
+      // Non-JSON error.
+    }
   }
 
   if (res.status === 403 || res.status === 401) {
@@ -678,7 +819,12 @@ async function parseResponse(res) {
       : "";
     const err = new Error(`An object already exists at that key${detail}`);
     err.fatal = true;
-    err.conflict = { key: body.key };
+    err.conflict = {
+      key: body.key,
+      size: existing?.size,
+      uploaded: existing?.uploaded ?? null,
+      uploadedBy: existing?.uploadedBy ?? null,
+    };
     throw err;
   }
 
@@ -756,7 +902,7 @@ function update(item) {
       state.textContent = "Uploaded";
       break;
     case "cancelled":
-      state.textContent = "Cancelled";
+      state.textContent = item.message || "Cancelled";
       break;
     case "conflict":
     case "error":
@@ -765,9 +911,18 @@ function update(item) {
   }
 
   const keyEl = li.querySelector(".key");
-  if (item.state === "done" && item.finalKey) {
+  const showHref =
+    (item.state === "done" && item.finalKey) ||
+    (item.state === "cancelled" && item.storedAfterCancel && item.finalKey) ||
+    (item.state === "pending" && item.key);
+
+  if (showHref) {
     keyEl.hidden = false;
-    keyEl.textContent = item.finalKey;
+    if (item.state === "pending") {
+      keyEl.textContent = `→ ${item.key}`;
+    } else {
+      keyEl.textContent = objectHref(item.finalKey);
+    }
   } else {
     keyEl.hidden = true;
   }
@@ -820,22 +975,124 @@ function renderActions(item, host) {
 
   if (item.state === "conflict") {
     add("Rename", () => rename(item));
-    add("Overwrite", () => {
-      item.overwrite = true;
-      retry(item);
-    });
+    add("Overwrite", () => confirmOverwrite(item));
   }
 
-  if (item.state === "done" && item.finalKey) {
-    add("Copy key", async () => {
+  const copyKey =
+    (item.state === "done" && item.finalKey) ||
+    (item.state === "cancelled" && item.storedAfterCancel && item.finalKey);
+  if (copyKey) {
+    const value = objectHref(item.finalKey);
+    const label = hasPublicUrl() ? "Copy URL" : "Copy key";
+    add(label, async () => {
       try {
-        await navigator.clipboard.writeText(item.finalKey);
-        showBanner(`Copied ${item.finalKey}`);
+        await navigator.clipboard.writeText(value);
+        showBanner(`Copied ${value}`);
       } catch {
         showBanner("Could not copy to clipboard.", true);
       }
     });
   }
+}
+
+// =========================================================================
+// Custom modal (replaces native confirm / prompt)
+// =========================================================================
+
+/**
+ * Show a modal dialog. Returns a Promise that resolves with:
+ *   - null when cancelled,
+ *   - When no checkbox: the input value (string) or true (confirm-only),
+ *   - When checkbox present: { value: string|true, checked: boolean }.
+ */
+function showModal({ title, body = "", inputValue, inputHidden = true, confirmLabel = "Confirm", danger = false, checkboxLabel }) {
+  return new Promise((resolve) => {
+    const modal = els.modalOverlay.querySelector(".modal");
+    const hasCheckbox = Boolean(checkboxLabel);
+    els.modalTitle.textContent = title;
+    els.modalBody.textContent = body;
+    els.modalInputWrap.hidden = inputHidden;
+    if (!inputHidden) {
+      els.modalInput.value = inputValue ?? "";
+    }
+    els.modalCheckboxWrap.hidden = !hasCheckbox;
+    if (hasCheckbox) {
+      els.modalCheckboxLabel.textContent = checkboxLabel;
+      els.modalCheckbox.checked = true;
+    }
+    els.modalConfirm.textContent = confirmLabel;
+    modal.classList.toggle("modal-danger", danger);
+    els.modalOverlay.hidden = false;
+
+    // Focus the input or the confirm button.
+    if (!inputHidden) {
+      els.modalInput.focus();
+      els.modalInput.select();
+    } else {
+      els.modalConfirm.focus();
+    }
+
+    function teardown() {
+      els.modalOverlay.hidden = true;
+      els.modalConfirm.removeEventListener("click", onConfirm);
+      els.modalCancel.removeEventListener("click", onCancel);
+      els.modalOverlay.removeEventListener("click", onBackdrop);
+      document.removeEventListener("keydown", onKey);
+    }
+
+    function result() {
+      const value = inputHidden ? true : els.modalInput.value;
+      return hasCheckbox ? { value, checked: els.modalCheckbox.checked } : value;
+    }
+
+    function onConfirm() {
+      teardown();
+      resolve(result());
+    }
+
+    function onCancel() {
+      teardown();
+      resolve(null);
+    }
+
+    function onBackdrop(e) {
+      if (e.target === els.modalOverlay) onCancel();
+    }
+
+    function onKey(e) {
+      if (e.key === "Escape") { e.preventDefault(); onCancel(); }
+      if (e.key === "Enter" && !e.isComposing) { e.preventDefault(); onConfirm(); }
+    }
+
+    els.modalConfirm.addEventListener("click", onConfirm);
+    els.modalCancel.addEventListener("click", onCancel);
+    els.modalOverlay.addEventListener("click", onBackdrop);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+async function confirmOverwrite(item) {
+  const key = item.conflict?.key || item.key;
+  const size = item.conflict?.size;
+  const uploaded = item.conflict?.uploaded;
+  const uploadedBy = item.conflict?.uploadedBy;
+  const details = [];
+  if (Number.isFinite(size)) details.push(`Existing size: ${formatBytes(size)}`);
+  if (uploaded) details.push(`Uploaded: ${new Date(uploaded).toLocaleString()}`);
+  if (uploadedBy) details.push(`Uploaded by: ${uploadedBy}`);
+  details.push("This cannot be undone from this tool.");
+
+  const result = await showModal({
+    title: "Overwrite existing file?",
+    body: `"${key}"\n${details.join("\n")}`,
+    inputHidden: true,
+    confirmLabel: "Overwrite",
+    danger: true,
+  });
+  if (!result) return;
+
+  item.overwrite = true;
+  retry(item);
 }
 
 function updateQueueVisibility() {
@@ -869,11 +1126,11 @@ function updateQueueVisibility() {
     els.queueSelectAll.indeterminate = false;
   }
 
-  // Build summary.
+  // Build summary — destination is per-row; summary only counts selection.
   const parts = [];
   if (pendingCount > 0) {
     parts.push(
-      `${selectedPendingCount} of ${pendingCount} selected (${formatBytes(selectedPendingSize)} of ${formatBytes(pendingSize)}) → ${currentPrefix || "/"}`,
+      `${selectedPendingCount} of ${pendingCount} selected (${formatBytes(selectedPendingSize)} of ${formatBytes(pendingSize)})`,
     );
   }
   if (activeCount > 0) parts.push(`${activeCount} uploading`);
@@ -904,10 +1161,13 @@ function removeItem(item) {
 function cancel(item) {
   item.cancelled = true;
   for (const c of item.controllers) c.abort();
+  // Queued / never started — no network yet, no HEAD.
   if (item.state === "queued" || item.state === "pending") {
     item.state = "cancelled";
+    item.message = "Cancelled";
     update(item);
   }
+  // In-flight: runUpload's catch/finally path calls resolveCancelOutcome.
 }
 
 function retry(item) {
@@ -915,16 +1175,41 @@ function retry(item) {
   item.message = "";
   item.conflict = null;
   item.loaded = 0;
+  item.storedAfterCancel = false;
   update(item);
   pump();
 }
 
-function rename(item) {
-  const next = prompt("New key for this file:", item.key);
-  if (!next) return;
-  item.key = next.trim();
+async function rename(item) {
+  // Show only the filename for editing; preserve the folder prefix.
+  const lastSlash = item.key.lastIndexOf("/");
+  const currentName = lastSlash >= 0 ? item.key.slice(lastSlash + 1) : item.key;
+  const prefix = lastSlash >= 0 ? item.key.slice(0, lastSlash + 1) : "";
+
+  const result = await showModal({
+    title: "Rename file",
+    body: prefix ? `In folder: ${prefix}` : "",
+    inputValue: currentName,
+    inputHidden: false,
+    confirmLabel: "Rename",
+    checkboxLabel: "Upload immediately after rename",
+  });
+  if (!result || !result.value.trim()) return;
+
+  item.key = prefix + result.value.trim();
   item.overwrite = false;
-  retry(item);
+
+  if (result.checked) {
+    retry(item);
+  } else {
+    // Return to pending — user must select and click Upload.
+    item.state = "pending";
+    item.message = "";
+    item.conflict = null;
+    item.selected = true;
+    update(item);
+    updateQueueVisibility();
+  }
 }
 
 function clearFinished() {

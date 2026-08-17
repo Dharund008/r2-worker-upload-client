@@ -15,11 +15,11 @@
 /* --- Light -------------------------------------------------------- */
 [data-theme="light"] {
   --bg: #ffffff;
-  --bg-surface: #f5f6f8;
-  --bg-raised: #ebedf0;
-  --bg-hover: #e0e2e6;
+  --bg-surface: #f7f8fa;
+  --bg-raised: #eef0f3;
+  --bg-hover: #e2e4e8;
   --border: #d0d3d9;
-  --border-subtle: #e2e4e8;
+  --border-subtle: #e8eaee;
   --text: #1a1c20;
   --text-secondary: #5a5e66;
   --text-tertiary: #8a8e96;
@@ -33,7 +33,8 @@
   --bar-bg: #e2e4e8;
   --bar-fill: #2563eb;
   --bar-done: #16a34a;
-  --dropzone-bg: #f8f9fa;
+  --done-bg: #f0fdf4;
+  --dropzone-bg: #f9fafb;
   --dropzone-border: #c8cbd0;
   --code-bg: #eef0f3;
   --shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -60,6 +61,7 @@
   --bar-bg: #282b33;
   --bar-fill: #3b82f6;
   --bar-done: #22c55e;
+  --done-bg: #0d1f12;
   --dropzone-bg: #15171c;
   --dropzone-border: #3a3e48;
   --code-bg: #1e2028;
@@ -87,6 +89,7 @@
   --bar-bg: #3e4148;
   --bar-fill: #60a5fa;
   --bar-done: #4ade80;
+  --done-bg: #1a2a1e;
   --dropzone-bg: #2a2c32;
   --dropzone-border: #505560;
   --code-bg: #32353c;
@@ -115,7 +118,8 @@
     --bar-bg: #e2e4e8;
     --bar-fill: #2563eb;
     --bar-done: #16a34a;
-    --dropzone-bg: #f8f9fa;
+    --done-bg: #f0fdf4;
+    --dropzone-bg: #f9fafb;
     --dropzone-border: #c8cbd0;
     --code-bg: #eef0f3;
     --shadow: 0 1px 3px rgba(0,0,0,0.08);
@@ -142,6 +146,7 @@
     --bar-bg: #282b33;
     --bar-fill: #3b82f6;
     --bar-done: #22c55e;
+    --done-bg: #0d1f12;
     --dropzone-bg: #15171c;
     --dropzone-border: #3a3e48;
     --code-bg: #1e2028;
@@ -171,7 +176,7 @@ body {
 .shell {
   max-width: 780px;
   margin: 0 auto;
-  padding: 32px 24px 64px;
+  padding: 40px 24px 64px;
 }
 
 /* ------------------------------------------------------------------ */
@@ -186,21 +191,22 @@ body {
   margin-bottom: 28px;
 }
 .brand-kicker {
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-secondary);
   margin-bottom: 4px;
 }
 .header h1 {
-  font-size: 1.0rem;
-  font-weight: 500;
+  font-size: 1.15rem;
+  font-weight: 600;
   letter-spacing: -0.02em;
 }
 .subtitle {
   color: var(--text-secondary);
   font-size: 0.88rem;
+  line-height: 1.4;
   margin-top: 4px;
 }
 .subtitle code {
@@ -245,7 +251,7 @@ body {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius);
   padding: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .browser-bar {
@@ -334,7 +340,8 @@ body {
   background: var(--bg-hover);
   border-color: var(--border);
 }
-.folder-tile svg { flex-shrink: 0; color: var(--text-tertiary); }
+.folder-tile svg { flex-shrink: 0; color: var(--text-tertiary); width: 20px; height: 20px; }
+.folder-tile span { font-weight: 500; }
 
 .folder-tile span {
   word-break: break-word;
@@ -428,13 +435,13 @@ body {
 /* Dropzone                                                           */
 /* ------------------------------------------------------------------ */
 
-.upload-area { margin-bottom: 20px; }
+.upload-area { margin-bottom: 24px; }
 
 .dropzone {
   background: var(--dropzone-bg);
-  border: 2px dashed var(--dropzone-border);
+  border: 1.5px dashed var(--dropzone-border);
   border-radius: var(--radius);
-  padding: 40px 24px;
+  padding: 32px 24px;
   text-align: center;
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
@@ -471,6 +478,8 @@ body {
   align-items: center;
   gap: 12px;
   margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
   flex-wrap: wrap;
 }
 .queue-meta {
@@ -512,8 +521,12 @@ body {
   background: var(--bg-raised);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-sm);
-  padding: 10px 14px;
-  transition: border-color var(--transition);
+  padding: 12px 16px;
+  border-left: 3px solid transparent;
+  transition: border-color var(--transition), background var(--transition);
+}
+.row:hover {
+  border-left-color: var(--border);
 }
 
 .row-main {
@@ -559,9 +572,9 @@ body {
 }
 
 .bar {
-  height: 4px;
+  height: 5px;
   background: var(--bar-bg);
-  border-radius: 2px;
+  border-radius: 3px;
   margin: 8px 0;
   overflow: hidden;
 }
@@ -570,8 +583,15 @@ body {
   height: 100%;
   width: 0;
   background: var(--bar-fill);
-  border-radius: 2px;
+  border-radius: 3px;
   transition: width 0.3s ease;
+}
+.row.done .bar > i {
+  animation: bar-pulse 0.4s ease 0.2s;
+}
+@keyframes bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
 }
 
 .row-bot {
@@ -595,11 +615,11 @@ body {
 }
 
 /* Row states */
-.row.done { border-color: var(--success); }
+.row.done { border-color: var(--success); background: var(--done-bg); border-left-color: var(--success); }
 .row.done .bar > i { background: var(--bar-done); }
 .row.done .state { color: var(--success); }
 
-.row.error, .row.conflict { border-color: var(--error); }
+.row.error, .row.conflict { border-color: var(--error); border-left-color: var(--error); }
 .row.error .state, .row.conflict .state { color: var(--error); }
 
 .row.cancelled .state { color: var(--text-tertiary); }
@@ -631,9 +651,10 @@ body {
   background: var(--bg-raised);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   padding: 6px 14px;
   font-size: 0.82rem;
+  font-weight: 500;
   cursor: pointer;
   transition: background var(--transition), border-color var(--transition);
   white-space: nowrap;
@@ -643,6 +664,11 @@ body {
   border-color: var(--border);
 }
 .btn:active { transform: scale(0.98); }
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: var(--accent);
+}
 .btn:disabled,
 .btn[disabled] {
   opacity: 0.55;
@@ -657,6 +683,7 @@ body {
   color: var(--accent-text);
   border-color: var(--accent);
   font-weight: 600;
+  padding: 7px 18px;
 }
 .btn-primary:hover {
   background: var(--accent-hover);
@@ -705,8 +732,124 @@ body {
 }
 
 /* ------------------------------------------------------------------ */
+/* Modal (replaces native confirm / prompt)                           */
+/* ------------------------------------------------------------------ */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 200;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  display: none;
+}
+
+.modal-overlay:not([hidden]) {
+  display: flex;
+}
+
+.modal {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), 0 8px 32px rgba(0, 0, 0, 0.18);
+  max-width: 420px;
+  width: 100%;
+  padding: 20px 24px 16px;
+  animation: modal-in 0.15s ease;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.modal-title {
+  margin: 0 0 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.modal-body {
+  margin: 0 0 14px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  white-space: pre-line;
+  word-break: break-word;
+}
+
+.modal-body:empty { display: none; }
+
+.modal-input-wrap {
+  margin-bottom: 14px;
+}
+
+.modal-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  font-size: 0.85rem;
+  font-family: var(--font);
+  background: var(--bg-surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.modal-input:focus {
+  border-color: var(--accent);
+}
+
+.modal-checkbox {
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: none;
+}
+
+.modal-checkbox:not([hidden]) {
+  display: flex;
+}
+
+.modal-checkbox input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* Danger variant — confirm button turns red */
+.modal.modal-danger #modal-confirm {
+  background: var(--error);
+  color: #fff;
+  border-color: var(--error);
+}
+.modal.modal-danger #modal-confirm:hover {
+  opacity: 0.9;
+}
+
+/* ------------------------------------------------------------------ */
 /* Responsive                                                         */
 /* ------------------------------------------------------------------ */
+
+@media (max-width: 640px) {
+  .browser-search {
+    flex: 1 1 100%;
+    max-width: none;
+    margin-left: 0;
+  }
+}
 
 @media (max-width: 520px) {
   .shell { padding: 20px 16px 48px; }
