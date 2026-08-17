@@ -10,7 +10,7 @@
 // /api/* reaches here, per assets.run_worker_first in wrangler.jsonc.
 
 import { verifyAccessJwt, AccessError } from "./access.js";
-import { resolveKey, normalizePrefix, assertWithinPrefix, KeyError } from "./keys.js";
+import { resolveKey, resolveBrowsePrefix, KeyError } from "./keys.js";
 
 // 50 MiB. R2 requires >= 5 MiB per non-final part, all non-final parts the same
 // size, and <= 10,000 parts — so this caps a single object at 488 GiB. It is also
@@ -52,10 +52,16 @@ export default {
             singlePutMax: SINGLE_PUT_MAX,
             uploadPrefix: env.UPLOAD_PREFIX || "",
             email: identity.email,
+            customerName: env.CUSTOMER_NAME || "",
+            bucketLabel: env.BUCKET_LABEL || "",
+            publicBaseUrl: stripTrailingSlashes(env.PUBLIC_BASE_URL || ""),
           });
 
         case "GET /api/browse":
           return await handleBrowse(env, url);
+
+        case "GET /api/head":
+          return await handleHead(env, url);
 
         case "PUT /api/upload/single":
           return await handleSingle(request, env, url, identity);
@@ -67,10 +73,10 @@ export default {
           return await handlePart(request, env, url);
 
         case "POST /api/upload/complete":
-          return await handleComplete(request, env);
+          return await handleComplete(request, env, identity);
 
         case "POST /api/upload/abort":
-          return await handleAbort(request, env);
+          return await handleAbort(request, env, identity);
 
         default:
           return json({ error: `No route for ${request.method} ${url.pathname}` }, 404);
@@ -78,6 +84,12 @@ export default {
     } catch (err) {
       if (err instanceof KeyError) return json({ error: err.message }, 400);
       if (err instanceof BadRequest) return json({ error: err.message }, err.status);
+      logEvent({
+        op: "unhandled",
+        status: 500,
+        email: identity?.email,
+        error: errText(err),
+      });
       console.error("Unhandled error", err?.stack || String(err));
       return json({ error: "Internal error" }, 500);
     }
@@ -89,25 +101,10 @@ export default {
 // ---------------------------------------------------------------------------
 
 async function handleBrowse(env, url) {
-  const prefix = normalizePrefix(env.UPLOAD_PREFIX || "");
-  const rawPath = url.searchParams.get("prefix") || "";
-
-  // Build the full R2 prefix. If UPLOAD_PREFIX is set, clamp browsing to
-  // that subtree. An empty rawPath means "show the root" (or the confined root).
-  let listPrefix;
-  if (rawPath === "" || rawPath === "/") {
-    listPrefix = prefix; // bucket root or confined root
-  } else {
-    // Normalise the client-supplied path: strip leading slash, ensure trailing slash.
-    const cleaned = rawPath.replace(/^\/+/, "").replace(/\/+$/, "");
-    listPrefix = cleaned ? `${cleaned}/` : "";
-
-    // If UPLOAD_PREFIX is set, assert the requested path is within it.
-    if (prefix && !listPrefix.startsWith(prefix)) {
-      listPrefix = `${prefix}${listPrefix}`;
-    }
-  }
-
+  const listPrefix = resolveBrowsePrefix(
+    url.searchParams.get("prefix") || "",
+    env.UPLOAD_PREFIX || "",
+  );
   const cursor = url.searchParams.get("cursor") || undefined;
 
   try {
@@ -154,6 +151,25 @@ async function handleBrowse(env, url) {
 }
 
 // ---------------------------------------------------------------------------
+// Head — existence check after cancel (does the object actually exist?).
+// ---------------------------------------------------------------------------
+
+async function handleHead(env, url) {
+  const prefix = env.UPLOAD_PREFIX || "";
+  const key = resolveKey(url.searchParams.get("key") || "", prefix);
+  const existing = await env.BUCKET.head(key);
+  if (!existing) {
+    return json({ exists: false, key });
+  }
+  return json({
+    exists: true,
+    key,
+    size: existing.size,
+    uploaded: existing.uploaded?.toISOString?.() ?? null,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Single-shot upload, for objects <= PART_SIZE.
 // ---------------------------------------------------------------------------
 
@@ -163,7 +179,16 @@ async function handleSingle(request, env, url, identity) {
   const overwrite = url.searchParams.get("overwrite") === "true";
 
   const collision = await checkCollision(env, key, overwrite);
-  if (collision) return collision;
+  if (collision) {
+    logEvent({
+      op: "upload.single",
+      key,
+      email: identity.email,
+      status: 409,
+      overwrite,
+    });
+    return collision;
+  }
 
   if (!request.body) throw new BadRequest("Request body is required");
 
@@ -171,6 +196,15 @@ async function handleSingle(request, env, url, identity) {
   const object = await env.BUCKET.put(key, request.body, {
     httpMetadata: httpMetadataFrom(request),
     customMetadata: auditMetadata(identity),
+  });
+
+  logEvent({
+    op: "upload.single",
+    key,
+    email: identity.email,
+    size: object.size,
+    status: 200,
+    overwrite,
   });
 
   return json({ key, etag: object.httpEtag, size: object.size });
@@ -197,8 +231,19 @@ async function handleCreate(request, env, identity) {
     );
   }
 
-  const collision = await checkCollision(env, key, body.overwrite === true);
-  if (collision) return collision;
+  const overwrite = body.overwrite === true;
+  const collision = await checkCollision(env, key, overwrite);
+  if (collision) {
+    logEvent({
+      op: "upload.create",
+      key,
+      email: identity.email,
+      size,
+      status: 409,
+      overwrite,
+    });
+    return collision;
+  }
 
   let upload;
   try {
@@ -207,8 +252,27 @@ async function handleCreate(request, env, identity) {
       customMetadata: auditMetadata(identity),
     });
   } catch (err) {
+    logEvent({
+      op: "upload.create",
+      key,
+      email: identity.email,
+      size,
+      status: 502,
+      error: errText(err),
+    });
     throw new BadRequest(`Could not start upload: ${errText(err)}`, 502);
   }
+
+  logEvent({
+    op: "upload.create",
+    key,
+    email: identity.email,
+    size,
+    status: 200,
+    uploadId: upload.uploadId,
+    partCount,
+    overwrite,
+  });
 
   return json({ key, uploadId: upload.uploadId, partSize: PART_SIZE, partCount });
 }
@@ -235,7 +299,7 @@ async function handlePart(request, env, url) {
   }
 }
 
-async function handleComplete(request, env) {
+async function handleComplete(request, env, identity) {
   const body = await readJson(request);
   const prefix = env.UPLOAD_PREFIX || "";
   const key = resolveKey(body.key || "", prefix);
@@ -258,6 +322,15 @@ async function handleComplete(request, env) {
   const upload = env.BUCKET.resumeMultipartUpload(key, body.uploadId);
   try {
     const object = await upload.complete(parts);
+    logEvent({
+      op: "upload.complete",
+      key,
+      email: identity?.email,
+      size: object.size,
+      status: 200,
+      uploadId: body.uploadId,
+      parts: parts.length,
+    });
     return json({
       key,
       etag: object.httpEtag,
@@ -265,13 +338,21 @@ async function handleComplete(request, env) {
       parts: parts.length,
     });
   } catch (err) {
+    logEvent({
+      op: "upload.complete",
+      key,
+      email: identity?.email,
+      status: 400,
+      uploadId: body.uploadId,
+      error: errText(err),
+    });
     throw new BadRequest(`Could not complete upload: ${errText(err)}`, 400);
   }
 }
 
 // Discards parts of an upload that was never completed. Cannot affect a stored
 // object: R2 only materialises the object on complete().
-async function handleAbort(request, env) {
+async function handleAbort(request, env, identity) {
   const body = await readJson(request);
   const prefix = env.UPLOAD_PREFIX || "";
   const key = resolveKey(body.key || "", prefix);
@@ -280,8 +361,23 @@ async function handleAbort(request, env) {
   const upload = env.BUCKET.resumeMultipartUpload(key, body.uploadId);
   try {
     await upload.abort();
+    logEvent({
+      op: "upload.abort",
+      key,
+      email: identity?.email,
+      status: 204,
+      uploadId: body.uploadId,
+    });
   } catch (err) {
     // Already gone or already completed — nothing to clean up either way.
+    logEvent({
+      op: "upload.abort",
+      key,
+      email: identity?.email,
+      status: 204,
+      uploadId: body.uploadId,
+      error: errText(err),
+    });
     console.warn(`Abort of ${key} (${body.uploadId}) failed: ${errText(err)}`);
   }
   return new Response(null, { status: 204 });
@@ -303,6 +399,7 @@ async function checkCollision(env, key, overwrite) {
       existing: {
         size: existing.size,
         uploaded: existing.uploaded?.toISOString?.() ?? null,
+        uploadedBy: existing.customMetadata?.["uploaded-by"] || null,
       },
     },
     409,
@@ -337,6 +434,14 @@ function requireParam(url, name) {
   const value = url.searchParams.get(name);
   if (!value) throw new BadRequest(`${name} is required`);
   return value;
+}
+
+function stripTrailingSlashes(value) {
+  return String(value || "").replace(/\/+$/, "");
+}
+
+function logEvent(fields) {
+  console.log(JSON.stringify({ ts: new Date().toISOString(), ...fields }));
 }
 
 function errText(err) {

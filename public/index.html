@@ -10,7 +10,7 @@
   <div class="shell">
     <header class="header">
       <div class="header-left">
-        <div class="brand-kicker">Associated Press</div>
+        <div class="brand-kicker" id="brand-kicker" hidden></div>
         <h1>R2 Upload</h1>
         <p class="subtitle">
           Uploads to <code id="bucket-note">R2</code>. Objects can be added, never deleted.
@@ -91,6 +91,25 @@
     </section>
 
     <div class="banner" id="banner" hidden></div>
+  </div>
+
+  <!-- Reusable modal (replaces native confirm/prompt) -->
+  <div class="modal-overlay" id="modal-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true">
+      <h3 class="modal-title" id="modal-title"></h3>
+      <p class="modal-body" id="modal-body"></p>
+      <div class="modal-input-wrap" id="modal-input-wrap" hidden>
+        <input type="text" class="modal-input" id="modal-input" autocomplete="off" />
+      </div>
+      <label class="modal-checkbox" id="modal-checkbox-wrap" hidden>
+        <input type="checkbox" id="modal-checkbox" checked />
+        <span id="modal-checkbox-label"></span>
+      </label>
+      <div class="modal-actions">
+        <button class="btn" id="modal-cancel">Cancel</button>
+        <button class="btn btn-primary" id="modal-confirm">Confirm</button>
+      </div>
+    </div>
   </div>
 
   <script src="/app.js"></script>

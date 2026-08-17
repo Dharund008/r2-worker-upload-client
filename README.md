@@ -15,15 +15,18 @@ bucket.
 - **Folder browser** — navigate the bucket's folder structure, drill into subfolders,
   create new folders (folders materialise when the first object is uploaded into them).
 - **Submit-gated uploads** — dropped/selected files are staged for review before upload
-  begins. An explicit **Upload** button starts the transfer.
+  begins. An explicit **Upload** button starts the transfer after checkbox selection.
 - **Multipart for large files** — files over 50 MiB are automatically sliced into parts
   and uploaded with 3-way concurrency, supporting objects up to ~488 GiB.
 - **Collision detection** — if a key already exists, the upload is refused with a 409.
-  The user can rename or explicitly overwrite.
+  The user can rename or overwrite after an explicit confirmation.
+- **Public URL or key copy** — after upload, the UI shows and copies either the public
+  object URL (`PUBLIC_BASE_URL` + key) or the full R2 key when the bucket is private.
 - **Theme support** — Dark, Light, Grey, and System (follows OS preference). Persisted
   in localStorage.
 - **Append-only** — no delete route exists in the Worker. `abort` only discards parts of
-  an in-flight, never-completed upload.
+  an in-flight, never-completed upload. Cancel of an in-flight upload HEADs the key once
+  so the UI can say whether anything was actually stored.
 
 ## Per-engagement configuration
 
@@ -37,13 +40,17 @@ is fully generic and reads everything from `env.*` at runtime.
 | `TEAM_DOMAIN` | `vars` | Cloudflare Access team domain |
 | `POLICY_AUD` | `vars` | Access application Audience tag |
 | `UPLOAD_PREFIX` | `vars` | Optional: confine uploads under a prefix. `""` = no confinement. |
+| `CUSTOMER_NAME` | `vars` | Header brand kicker. `""` hides it. |
+| `BUCKET_LABEL` | `vars` | Display name shown in the UI (binding does not expose `bucket_name` at runtime). |
+| `PUBLIC_BASE_URL` | `vars` | Optional public origin (`https://cdn.example.com` or `https://pub-xxx.r2.dev`). `""` = private; UI copies the full key instead of a URL. |
 
 ### Setup
 
 ```sh
 npm install
 
-# 1. Edit wrangler.jsonc with the customer's bucket names, Access domain, and AUD.
+# 1. Edit wrangler.jsonc with the customer's bucket names, Access domain, AUD,
+#    CUSTOMER_NAME, BUCKET_LABEL, and PUBLIC_BASE_URL (if the bucket is public).
 
 # 2. Create the bucket if it does not exist
 npx wrangler r2 bucket create <bucket-name>
@@ -80,6 +87,19 @@ with other tooling (e.g. a bulk migration) and you want structural separation.
 When `UPLOAD_PREFIX` is `""` (empty), uploads can land anywhere in the bucket and the
 browser starts at the bucket root. Access-gating remains the trust boundary.
 
+Browse paths use the same sanitisation / confinement helpers as upload keys
+(`resolveBrowsePrefix` in `src/keys.js`).
+
+## Public URL vs key
+
+Public access on R2 is bucket-level (custom domain or `r2.dev`), not per-object.
+Set `PUBLIC_BASE_URL` when objects are publicly reachable; leave it empty for private
+buckets. The existing `GET /api/config` returns `publicBaseUrl` once at page load — no
+extra per-object API calls. After a successful upload the UI shows and copies:
+
+- **Copy URL** → `{PUBLIC_BASE_URL}/{key}` when configured
+- **Copy key** → the full R2 object key when `PUBLIC_BASE_URL` is empty
+
 ## Why there is no delete
 
 The Worker is deliberately **append-only**. Three independent guarantees:
@@ -103,17 +123,25 @@ POST /api/upload/abort     {key, uploadId}           -> 204
 
 Part size is **50 MiB**, giving a **488 GiB ceiling** per object (50 MiB × 10,000 parts).
 
+Files at or below 50 MiB use a single PUT via XHR so the UI can show byte-level upload
+progress.
+
 ## API routes
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/config` | Client configuration (part size, prefix, user email) |
+| `GET` | `/api/config` | Client configuration (part size, prefix, chrome, public base URL, user email) |
 | `GET` | `/api/browse?prefix=&cursor=` | List folders and files at a prefix (paginated) |
+| `GET` | `/api/head?key=` | Existence check after cancel (`exists`, size, uploaded) |
 | `PUT` | `/api/upload/single?key=` | Single-shot upload (≤ 50 MiB) |
 | `POST` | `/api/upload/create` | Start multipart upload |
 | `PUT` | `/api/upload/part?key=&uploadId=&partNumber=` | Upload one part |
 | `POST` | `/api/upload/complete` | Finalise multipart upload |
 | `POST` | `/api/upload/abort` | Discard incomplete multipart parts |
+
+`GET /api/head` is used only after an **in-flight** cancel. Queued/never-started cancels
+do not call it. Folder search filters the already-loaded folder client-side and does not
+issue extra Worker requests.
 
 ## Authentication
 
@@ -124,11 +152,18 @@ each object's `customMetadata` as `uploaded-by`.
 If `REQUIRE_ACCESS` is `true` but `TEAM_DOMAIN`/`POLICY_AUD` are unset, every request
 returns `500` — the Worker fails closed.
 
+## Observability
+
+Write paths (`upload.single`, `upload.create`, `upload.complete`, `upload.abort`) and
+unhandled errors emit a single-line JSON log (`op`, `key`, `email`, `size`, `status`, …).
+Successful browse listings and individual multipart parts are not logged, to keep volume
+and cost down. `observability.enabled` remains on in `wrangler.jsonc`.
+
 ## Layout
 
 ```
 wrangler.jsonc        Config: R2 binding, asset routing, vars, production env
-src/index.js          Routes: browse, upload (single + multipart), config
+src/index.js          Routes: browse, head, upload (single + multipart), config
 src/access.js         Access JWT verification
 src/keys.js           Key sanitisation and prefix confinement
 public/index.html     UI
@@ -158,6 +193,9 @@ curl -i -X POST https://<worker>.workers.dev/api/upload/create \
 
 # Browse the bucket root
 curl -i https://<worker>.workers.dev/api/browse?prefix=
+
+# Config (chrome + public base URL)
+curl -i https://<worker>.workers.dev/api/config
 
 # Watch live logs
 npm run tail
