@@ -73,7 +73,7 @@ let browseLoading = false;
 // on entry, then rendered in client-side batches for instant paging & search.
 const BROWSE_PAGE_SIZE = 50;
 let allFolders = []; // { name, prefix }
-let allFiles = [];   // { name, size }
+let allFiles = [];   // { name, key, size }
 let displayedCount = 0;
 
 const items = []; // upload records
@@ -96,7 +96,7 @@ async function init() {
   try {
     const res = await fetch("/api/config");
     if (res.status === 403) {
-      showBanner("Your session has expired. Reload the page to sign in again.", true);
+      showBanner("Your session has expired. Reload the page to sign in again.", "error");
       return;
     }
     if (res.ok) {
@@ -194,7 +194,7 @@ function createAndEnterFolder() {
 
   // Basic validation: no path traversal, no control chars.
   if (/[\\]/.test(raw) || /\.\./.test(raw) || /[\x00-\x1f\x7f]/.test(raw)) {
-    showBanner("Invalid folder name.", true);
+    showBanner("Invalid folder name.", "error");
     return;
   }
 
@@ -293,6 +293,14 @@ function renderBatch(append) {
   const combined = [...filteredFolders, ...filteredFiles];
   const batch = combined.slice(start, end);
 
+  // Add list header on first render (not append).
+  if (!append && (filteredFolders.length > 0 || filteredFiles.length > 0)) {
+    const header = document.createElement("div");
+    header.className = "browse-list-header";
+    header.innerHTML = `<span class="blh-icon"></span><span class="blh-name">Name</span><span class="blh-size">Size</span><span class="blh-action"></span>`;
+    els.folderGrid.appendChild(header);
+  }
+
   for (const item of batch) {
     if (item.prefix !== undefined) {
       // It's a folder.
@@ -302,12 +310,13 @@ function renderBatch(append) {
       tile.dataset.kind = "folder";
       tile.dataset.name = item.name.toLowerCase();
       tile.innerHTML = `
-        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+        <span class="ft-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M1.5 2A1.5 1.5 0 000 3.5v9A1.5 1.5 0 001.5 14h13a1.5 1.5 0 001.5-1.5V5a1.5 1.5 0 00-1.5-1.5H7.71L6.85 2.64A1.5 1.5 0 005.71 2H1.5z"/>
-        </svg>
-        <span></span>
+        </svg></span>
+        <span class="ft-name"></span>
+        <span class="ft-meta">-</span>
       `;
-      tile.querySelector("span").textContent = item.name;
+      tile.querySelector(".ft-name").textContent = item.name;
       tile.addEventListener("click", () => navigateTo(item.prefix));
       els.folderGrid.appendChild(tile);
     } else {
@@ -317,9 +326,34 @@ function renderBatch(append) {
       entry.title = item.name;
       entry.dataset.kind = "file";
       entry.dataset.name = item.name.toLowerCase();
-      entry.innerHTML = `<span class="fe-name"></span><span class="fe-size"></span>`;
+
+      const copyTitle = hasPublicUrl() ? "Copy source URL" : "Copy key";
+      const copySvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>`;
+      const checkSvg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>`;
+      entry.innerHTML = `
+        <span class="fe-icon"><svg width="14" height="16" viewBox="0 0 14 16" fill="currentColor">
+          <path d="M8.5 0H1.5A1.5 1.5 0 000 1.5v13A1.5 1.5 0 001.5 16h11a1.5 1.5 0 001.5-1.5V5.5L8.5 0zM9 1.5L12.5 5H9.5A.5.5 0 019 4.5V1.5zM1.5 15a.5.5 0 01-.5-.5v-13a.5.5 0 01.5-.5H8v4.5A1.5 1.5 0 009.5 6H13v8.5a.5.5 0 01-.5.5h-11z"/>
+        </svg></span>
+        <span class="fe-name"></span>
+        <span class="fe-size"></span>
+        <button class="fe-copy" title="${copyTitle}">${copySvg}</button>
+      `;
       entry.querySelector(".fe-name").textContent = item.name;
       entry.querySelector(".fe-size").textContent = formatBytes(item.size);
+      const copyBtn = entry.querySelector(".fe-copy");
+      copyBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const value = objectHref(item.key);
+        navigator.clipboard.writeText(value).then(() => {
+          copyBtn.innerHTML = checkSvg;
+          copyBtn.style.color = "var(--success)";
+          showBanner(`Copied: ${value}`, "success");
+          setTimeout(() => {
+            copyBtn.innerHTML = copySvg;
+            copyBtn.style.color = "";
+          }, 2000);
+        });
+      });
       els.folderGrid.appendChild(entry);
     }
   }
@@ -470,13 +504,13 @@ function addFiles(fileList) {
 function startUpload() {
   const pendingItems = items.filter((item) => item.state === "pending");
   if (pendingItems.length === 0) {
-    showBanner("Add files before uploading.", true);
+    showBanner("Add files before uploading.", "error");
     return;
   }
 
   const selectedPending = pendingItems.filter((item) => item.selected === true);
   if (selectedPending.length === 0) {
-    showBanner("Select at least one file to upload.", true);
+    showBanner("Select at least one file to upload.", "error");
     return;
   }
 
@@ -572,7 +606,7 @@ async function resolveCancelOutcome(item) {
       if (data.exists) {
         item.finalKey = data.key || key;
         item.storedAfterCancel = true;
-        item.message = `Cancelled — object is stored at ${objectHref(item.finalKey)}`;
+        item.message = `Cancelled - object is stored at ${objectHref(item.finalKey)}`;
         update(item);
         return;
       }
@@ -582,7 +616,7 @@ async function resolveCancelOutcome(item) {
   }
 
   item.storedAfterCancel = false;
-  item.message = "Cancelled — nothing stored.";
+  item.message = "Cancelled - nothing stored.";
   update(item);
 }
 
@@ -806,9 +840,9 @@ async function parseResponse(res, preParsed) {
   }
 
   if (res.status === 403 || res.status === 401) {
-    const err = new Error("Your session has expired — reload the page to sign in again.");
+    const err = new Error("Your session has expired - reload the page to sign in again.");
     err.fatal = true;
-    showBanner(err.message, true);
+    showBanner(err.message, "error");
     throw err;
   }
 
@@ -987,9 +1021,9 @@ function renderActions(item, host) {
     add(label, async () => {
       try {
         await navigator.clipboard.writeText(value);
-        showBanner(`Copied ${value}`);
+        showBanner(`Copied ${value}`, "success");
       } catch {
-        showBanner("Could not copy to clipboard.", true);
+        showBanner("Could not copy to clipboard.", "error");
       }
     });
   }
@@ -1244,9 +1278,11 @@ function warnIfActive(event) {
 }
 
 let bannerTimer;
-function showBanner(message, isError = false) {
+function showBanner(message, variant = "") {
   els.banner.textContent = message;
-  els.banner.className = isError ? "banner error" : "banner";
+  els.banner.className = variant === "error" ? "banner error"
+    : variant === "success" ? "banner success"
+    : "banner";
   els.banner.classList.remove("is-hiding");
   els.banner.hidden = false;
   clearTimeout(bannerTimer);
@@ -1260,7 +1296,7 @@ function showBanner(message, isError = false) {
 }
 
 function formatBytes(bytes) {
-  if (!Number.isFinite(bytes)) return "—";
+  if (!Number.isFinite(bytes)) return "-";
   if (bytes < 1024) return `${Math.round(bytes)} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = bytes / 1024;
