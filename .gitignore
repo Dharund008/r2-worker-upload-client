@@ -8,3 +8,6 @@ node_modules/
 # Per-engagement config: contains customer name, account ID, Access AUD tags,
 # bucket names, and public domain. Copy wrangler.jsonc.example and fill it in.
 wrangler.jsonc
+
+# Local Nodeterm canvas/session state — not project source.
+.nodeterm/
