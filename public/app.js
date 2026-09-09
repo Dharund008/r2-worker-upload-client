@@ -4,8 +4,9 @@
 // lazy Blob view, and each slice is handed straight to fetch()/XHR as the request
 // body. That is what lets a 65 GB file upload from a tab without exhausting memory.
 
-const PART_CONCURRENCY = 3; // parts in flight within one file
-const MAX_PART_ATTEMPTS = 3; // per part, before the file is marked failed
+const LEGACY_PART_CONCURRENCY = 3; // legacy proxied path
+const MAX_PART_ATTEMPTS = 3;        // per part, before the file is marked failed
+const PRESIGN_BATCH_SIZE = 100;      // presigned URLs fetched at a time
 const THEME_KEY = "r2-upload-theme";
 
 // =========================================================================
@@ -63,6 +64,7 @@ let config = {
   bucketLabel: "",
   publicBaseUrl: "",
   email: "",
+  presignedUploads: false,
 };
 
 // Current browse path (full R2 prefix, e.g. "uploads/sample/")
@@ -71,7 +73,7 @@ let browseLoading = false;
 
 // Full-fetch browse: all items in the current folder are loaded into memory
 // on entry, then rendered in client-side batches for instant paging & search.
-const BROWSE_PAGE_SIZE = 50;
+const BROWSE_PAGE_SIZE = 300;
 let allFolders = []; // { name, prefix }
 let allFiles = [];   // { name, key, size }
 let displayedCount = 0;
@@ -92,6 +94,8 @@ async function init() {
   els.clearDone.addEventListener("click", clearFinished);
   els.uploadBtn.addEventListener("click", startUpload);
   window.addEventListener("beforeunload", warnIfActive);
+  window.addEventListener("offline", handleOffline);
+  window.addEventListener("online", handleOnline);
 
   try {
     const res = await fetch("/api/config");
@@ -483,7 +487,14 @@ function addFiles(fileList) {
       uploadId: null,
       controllers: new Set(),
       cancelled: false,
+      paused: false,
+      pauseReason: null,       // "user" | "network" | null
+      _pausePromise: null,
+      _pauseResolve: null,
+      _clearPresignCache: null,
       startedAt: 0,
+      pausedAt: 0,             // timestamp when paused (for ETA adjustment)
+      pausedDuration: 0,       // total ms spent paused
       finalKey: null,
       message: "",
       conflict: null,
@@ -553,15 +564,18 @@ async function runUpload(item) {
   item.state = "uploading";
   item.loaded = 0;
   item.cancelled = false;
+  item.paused = false;
+  item.pauseReason = null;
+  item.pausedDuration = 0;
   item.storedAfterCancel = false;
   item.startedAt = Date.now();
   update(item);
 
   try {
     if (item.file.size <= config.singlePutMax) {
-      await uploadSingle(item);
+      await (config.presignedUploads ? uploadSinglePresigned(item) : uploadSingle(item));
     } else {
-      await uploadMultipart(item);
+      await (config.presignedUploads ? uploadMultipartPresigned(item) : uploadMultipart(item));
     }
     if (item.cancelled) {
       await resolveCancelOutcome(item);
@@ -589,6 +603,8 @@ async function runUpload(item) {
  * Queued/never-started cancels skip this (no network yet).
  */
 async function resolveCancelOutcome(item) {
+  // Already handled by immediate cancel in cancel().
+  if (item.state === "cancelled") return;
   const key = item.finalKey || item.key;
   item.state = "cancelled";
 
@@ -695,7 +711,250 @@ function xhrPut(url, body, item, headers = {}) {
 }
 
 // =========================================================================
-// Multipart upload
+// Presigned single upload — browser PUTs directly to R2
+// =========================================================================
+
+async function uploadSinglePresigned(item) {
+  // Step 1: Get presigned URL from Worker (no file body sent here).
+  const presign = await parseResponse(
+    await fetch("/api/upload/presign-single", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: item.key,
+        size: item.file.size,
+        contentType: item.file.type || undefined,
+        overwrite: item.overwrite,
+      }),
+    }),
+  );
+
+  item.finalKey = presign.key;
+
+  // Step 2: PUT directly to R2 via presigned URL.
+  const headers = presign.requiredHeaders || {};
+  await xhrPut(presign.presignedUrl, item.file, item, headers);
+  item.loaded = item.file.size;
+}
+
+// =========================================================================
+// Presigned multipart upload — parts go directly to R2
+// =========================================================================
+
+async function uploadMultipartPresigned(item) {
+  // Step 1: Create multipart upload (still via Worker → R2 binding).
+  const created = await parseResponse(
+    await fetch("/api/upload/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        key: item.key,
+        size: item.file.size,
+        contentType: item.file.type || undefined,
+        overwrite: item.overwrite,
+      }),
+    }),
+  );
+
+  item.uploadId = created.uploadId;
+  item.finalKey = created.key;
+  const partSize = created.partSize;
+  const partCount = created.partCount;
+  const concurrency = computeConcurrency(partSize);
+
+  const parts = new Array(partCount);
+  const partProgress = new Array(partCount).fill(0);
+  let nextPart = 0;
+
+  // Presigned URL cache — fetched in batches as workers need them.
+  const presignedUrls = {};
+  // One shared promise per batch so all workers wait on the same fetch.
+  const batchPromises = {};
+
+  // Expose cache clearing so resumeItem can invalidate expired URLs.
+  item._clearPresignCache = () => {
+    for (const key of Object.keys(presignedUrls)) delete presignedUrls[key];
+    for (const key of Object.keys(batchPromises)) delete batchPromises[key];
+  };
+
+  async function fetchPresignedBatch(batchStart) {
+    const needed = [];
+    for (let i = batchStart; i < batchStart + PRESIGN_BATCH_SIZE && i < partCount; i++) {
+      if (!presignedUrls[i + 1]) needed.push(i + 1);
+    }
+    if (needed.length === 0) return;
+
+    const res = await parseResponse(
+      await fetch("/api/upload/presign-parts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: item.finalKey,
+          uploadId: item.uploadId,
+          parts: needed,
+        }),
+      }),
+    );
+    Object.assign(presignedUrls, res.urls);
+  }
+
+  function ensurePresignedUrls(index) {
+    const batchStart = Math.floor(index / PRESIGN_BATCH_SIZE) * PRESIGN_BATCH_SIZE;
+    if (!batchPromises[batchStart]) {
+      batchPromises[batchStart] = fetchPresignedBatch(batchStart);
+    }
+    return batchPromises[batchStart];
+  }
+
+  const worker = async () => {
+    for (;;) {
+      if (item.cancelled) return;
+      // Block here while paused — workers that finish their current part
+      // wait until resumed. In-flight XHRs complete (don't waste bytes).
+      while (item.paused) {
+        await item._pausePromise;
+        if (item.cancelled) return;
+      }
+      const index = nextPart++;
+      if (index >= partCount) return;
+
+      // Wait for this batch's presigned URLs — all workers in the same
+      // batch share one fetch promise, so the request happens only once.
+      await ensurePresignedUrls(index);
+
+      const partNumber = index + 1;
+      const presignedUrl = presignedUrls[partNumber];
+      if (!presignedUrl) {
+        throw new Error(`No presigned URL for part ${partNumber}`);
+      }
+
+      const start = index * partSize;
+      const blob = item.file.slice(start, Math.min(start + partSize, item.file.size));
+
+      parts[index] = await uploadPartPresigned(
+        item, partNumber, blob, presignedUrl,
+        (loaded) => {
+          partProgress[index] = loaded;
+          item.loaded = partProgress.reduce((a, b) => a + b, 0);
+          update(item);
+        },
+      );
+
+      // Mark part as fully done in progress.
+      partProgress[index] = blob.size;
+      item.loaded = partProgress.reduce((a, b) => a + b, 0);
+      update(item);
+    }
+  };
+
+  try {
+    await Promise.all(
+      Array.from({ length: Math.min(concurrency, partCount) }, worker),
+    );
+    if (item.cancelled) throw new Error("Cancelled");
+
+    // Step 3: Complete (still via Worker → R2 binding).
+    const data = await parseResponse(
+      await fetch("/api/upload/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          key: item.finalKey,
+          uploadId: item.uploadId,
+          parts: parts.filter(Boolean),
+        }),
+      }),
+    );
+    item.finalKey = data.key;
+    item.uploadId = null;
+  } catch (err) {
+    await abortUpload(item);
+    throw err;
+  }
+}
+
+async function uploadPartPresigned(item, partNumber, blob, presignedUrl, onProgress) {
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_PART_ATTEMPTS; attempt++) {
+    if (item.cancelled) throw new Error("Cancelled");
+
+    try {
+      const xhr = await xhrPutRaw(presignedUrl, blob, item, onProgress);
+      const etag = xhr.getResponseHeader("ETag");
+      return { partNumber, etag };
+    } catch (err) {
+      lastErr = err;
+      if (item.cancelled) throw err;
+      // If offline, wait for connectivity instead of burning retry attempts.
+      if (!navigator.onLine) {
+        await new Promise((resolve) =>
+          window.addEventListener("online", resolve, { once: true }),
+        );
+        attempt--; // don't count this as an attempt
+        continue;
+      }
+      if (attempt < MAX_PART_ATTEMPTS) {
+        await sleep(2 ** attempt * 500);
+      }
+    }
+  }
+  throw new Error(
+    `Part ${partNumber} failed after ${MAX_PART_ATTEMPTS} attempts: ${lastErr?.message || "unknown error"}`,
+  );
+}
+
+/**
+ * PUT with progress — returns the raw XHR so the caller can read response headers
+ * (e.g. ETag from R2). Unlike xhrPut(), does not parse the response as JSON.
+ */
+function xhrPutRaw(url, body, item, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    item.controllers.add(xhr);
+
+    xhr.open("PUT", url);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        onProgress(event.loaded);
+      }
+    };
+
+    xhr.onload = () => {
+      item.controllers.delete(xhr);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr);
+      } else {
+        reject(new Error(`Part upload failed: HTTP ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      item.controllers.delete(xhr);
+      reject(new Error("Network error during upload"));
+    };
+
+    xhr.onabort = () => {
+      item.controllers.delete(xhr);
+      reject(new Error("Cancelled"));
+    };
+
+    xhr.send(body);
+  });
+}
+
+/** Scale concurrency inversely with part size — large parts saturate bandwidth. */
+function computeConcurrency(partSize) {
+  const MB = 1024 * 1024;
+  if (partSize <= 50 * MB) return 12;
+  if (partSize <= 300 * MB) return 10;
+  if (partSize <= 512 * MB) return 8;
+  if (partSize <= 1024 * MB) return 6;
+  return 4;
+}
+
+// =========================================================================
+// Multipart upload (legacy proxied path)
 // =========================================================================
 
 async function uploadMultipart(item) {
@@ -724,6 +983,10 @@ async function uploadMultipart(item) {
   const worker = async () => {
     for (;;) {
       if (item.cancelled) return;
+      while (item.paused) {
+        await item._pausePromise;
+        if (item.cancelled) return;
+      }
       const index = nextPart++;
       if (index >= partCount) return;
 
@@ -741,7 +1004,7 @@ async function uploadMultipart(item) {
 
   try {
     await Promise.all(
-      Array.from({ length: Math.min(PART_CONCURRENCY, partCount) }, worker),
+      Array.from({ length: Math.min(LEGACY_PART_CONCURRENCY, partCount) }, worker),
     );
     if (item.cancelled) throw new Error("Cancelled");
 
@@ -914,7 +1177,7 @@ function update(item) {
     ? Math.min(100, Math.round((item.loaded / item.file.size) * 100))
     : 0;
   li.querySelector(".bar > i").style.width = `${item.state === "done" ? 100 : pct}%`;
-  li.className = `row ${item.state}`;
+  li.className = `row ${item.state}${item.paused ? " paused" : ""}`;
 
   const state = li.querySelector(".state");
   switch (item.state) {
@@ -925,11 +1188,19 @@ function update(item) {
       state.textContent = "Queued";
       break;
     case "uploading": {
-      const elapsed = (Date.now() - item.startedAt) / 1000;
+      if (item.paused) {
+        state.textContent =
+          `Paused · ${formatBytes(item.loaded)} of ${formatBytes(item.file.size)}`;
+        break;
+      }
+      const elapsed = (Date.now() - item.startedAt - item.pausedDuration) / 1000;
       const rate = elapsed > 0.5 ? item.loaded / elapsed : 0;
+      const remaining = item.file.size - item.loaded;
+      const eta = rate > 0 ? remaining / rate : 0;
       state.textContent =
         `${pct}% · ${formatBytes(item.loaded)} of ${formatBytes(item.file.size)}` +
-        (rate ? ` · ${formatBytes(rate)}/s` : "");
+        (rate ? ` · ${formatBytes(rate)}/s` : "") +
+        (eta > 1 ? ` · ${formatEta(eta)} remaining` : "");
       break;
     }
     case "done":
@@ -961,7 +1232,14 @@ function update(item) {
     keyEl.hidden = true;
   }
 
-  renderActions(item, li.querySelector(".actions"));
+  // Only re-render action buttons when state actually changes — avoids
+  // DOM thrashing on every progress tick that causes hover-to-click bugs.
+  const actionsHost = li.querySelector(".actions");
+  const stateKey = `${item.state}:${item.paused}:${item.pauseReason}`;
+  if (actionsHost._renderedForState !== stateKey) {
+    renderActions(item, actionsHost);
+    actionsHost._renderedForState = stateKey;
+  }
   renderSelection(item, li);
   updateQueueVisibility();
 }
@@ -1000,6 +1278,19 @@ function renderActions(item, host) {
   }
 
   if (item.state === "uploading" || item.state === "queued") {
+    // Pause only for multipart uploads (large files) that are actively uploading.
+    if (item.state === "uploading" && !item.paused && item.file.size > config.singlePutMax) {
+      add("Pause", () => pauseItem(item));
+    }
+    if (item.paused && item.pauseReason === "user") {
+      add("Resume", () => resumeItem(item));
+    }
+    if (item.paused && item.pauseReason === "network") {
+      const span = document.createElement("span");
+      span.className = "network-wait-label";
+      span.textContent = "Waiting for network…";
+      host.appendChild(span);
+    }
     add("Cancel", () => cancel(item));
   }
 
@@ -1192,16 +1483,66 @@ function removeItem(item) {
   }
 }
 
-function cancel(item) {
+async function cancel(item) {
+  // Confirmation modal for in-flight uploads.
+  if (item.state === "uploading") {
+    const confirmed = await showModal({
+      title: "Cancel upload?",
+      body: `${formatBytes(item.loaded)} of ${formatBytes(item.file.size)} uploaded so far. This cannot be undone.`,
+      confirmLabel: "Cancel upload",
+      danger: true,
+    });
+    if (!confirmed) return;
+    // Upload may have completed while the modal was open.
+    if (item.state === "done") return;
+  }
+
+  // Unpause first so workers can exit cleanly.
+  if (item.paused && item._pauseResolve) {
+    item.paused = false;
+    item._pauseResolve();
+  }
+
   item.cancelled = true;
   for (const c of item.controllers) c.abort();
-  // Queued / never started — no network yet, no HEAD.
-  if (item.state === "queued" || item.state === "pending") {
-    item.state = "cancelled";
-    item.message = "Cancelled";
-    update(item);
+
+  // Immediate state transition for ALL states (including in-flight).
+  item.state = "cancelled";
+  item.message = "Cancelled";
+  update(item);
+
+  // Fire-and-forget multipart cleanup.
+  abortUpload(item);
+}
+
+function pauseItem(item, reason = "user") {
+  if (item.state !== "uploading" || item.paused) return;
+  item.paused = true;
+  item.pauseReason = reason;
+  item.pausedAt = Date.now();
+  item._pausePromise = new Promise((resolve) => {
+    item._pauseResolve = resolve;
+  });
+  update(item);
+}
+
+function resumeItem(item) {
+  if (!item.paused) return;
+  // Track time spent paused so ETA calculation stays accurate.
+  if (item.pausedAt) {
+    item.pausedDuration += Date.now() - item.pausedAt;
+    item.pausedAt = 0;
   }
-  // In-flight: runUpload's catch/finally path calls resolveCancelOutcome.
+  item.paused = false;
+  item.pauseReason = null;
+  // Clear cached presigned URLs — they may have expired during pause.
+  if (item._clearPresignCache) item._clearPresignCache();
+  if (item._pauseResolve) {
+    item._pauseResolve();
+    item._pauseResolve = null;
+    item._pausePromise = null;
+  }
+  update(item);
 }
 
 function retry(item) {
@@ -1277,8 +1618,38 @@ function warnIfActive(event) {
   }
 }
 
+function handleOffline() {
+  let paused = 0;
+  for (const item of items) {
+    if (item.state === "uploading" && !item.paused) {
+      pauseItem(item, "network");
+      paused++;
+    }
+  }
+  if (paused > 0) {
+    showBanner(
+      "Network lost — uploads paused. Will resume when connection is restored.",
+      "error",
+      { persistent: true },
+    );
+  }
+}
+
+function handleOnline() {
+  let resumed = 0;
+  for (const item of items) {
+    if (item.paused && item.pauseReason === "network") {
+      resumeItem(item);
+      resumed++;
+    }
+  }
+  if (resumed > 0) {
+    showBanner("Network restored — resuming uploads.", "success");
+  }
+}
+
 let bannerTimer;
-function showBanner(message, variant = "") {
+function showBanner(message, variant = "", opts = {}) {
   els.banner.textContent = message;
   els.banner.className = variant === "error" ? "banner error"
     : variant === "success" ? "banner success"
@@ -1286,13 +1657,27 @@ function showBanner(message, variant = "") {
   els.banner.classList.remove("is-hiding");
   els.banner.hidden = false;
   clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => {
-    els.banner.classList.add("is-hiding");
-    setTimeout(() => {
-      els.banner.hidden = true;
-      els.banner.classList.remove("is-hiding");
-    }, 300);
-  }, 5000);
+  if (!opts.persistent) {
+    bannerTimer = setTimeout(() => {
+      els.banner.classList.add("is-hiding");
+      setTimeout(() => {
+        els.banner.hidden = true;
+        els.banner.classList.remove("is-hiding");
+      }, 300);
+    }, 5000);
+  }
+}
+
+function formatEta(seconds) {
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}m ${s}s`;
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
 }
 
 function formatBytes(bytes) {

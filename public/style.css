@@ -689,6 +689,22 @@ body {
 
 .row.cancelled .state { color: var(--text-tertiary); }
 
+.row.uploading.paused .bar > i {
+  background: var(--warning, #d97706);
+  animation: bar-paused-pulse 2s ease-in-out infinite;
+}
+@keyframes bar-paused-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+.row.uploading.paused .state { color: var(--warning, #d97706); }
+
+.network-wait-label {
+  font-size: 0.78rem;
+  color: var(--warning, #d97706);
+  font-style: italic;
+}
+
 .row.pending { opacity: 0.85; }
 .row.pending .bar > i { background: var(--text-tertiary); width: 0 !important; }
 
