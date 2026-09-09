@@ -1,0 +1,100 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "CHANGEME-r2-upload-client",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-06",
+  "preview_urls": false,
+
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "CHANGEME-dev"
+    }
+  ],
+
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "vars": {
+    // Cloudflare Access team domain, e.g. "https://yourteam.cloudflareaccess.com".
+    "TEAM_DOMAIN": "",
+    // The Access application's Audience (AUD) tag.
+    "POLICY_AUD": "",
+    // Optional: confine all uploads under this prefix. "" = no confinement.
+    "UPLOAD_PREFIX": "",
+    // MUST be "true" in production. "false" only for local `wrangler dev`.
+    "REQUIRE_ACCESS": "false",
+    // Header brand kicker shown in the UI. "" hides it.
+    "CUSTOMER_NAME": "",
+    // Display name for the bucket in the UI (binding doesn't expose bucket_name at runtime).
+    "R2_BUCKET_NAME": "CHANGEME-dev",
+    // Cloudflare account ID. Required for presigned uploads.
+    "CF_ACCOUNT_ID": "",
+    // Optional public origin (custom domain or r2.dev). "" = private bucket.
+    "PUBLIC_BASE_URL": ""
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "env": {
+    "dev": {
+      "name": "CHANGEME-r2-upload-client",
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "CHANGEME-dev"
+        }
+      ],
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/api/*"]
+      },
+      "vars": {
+        "TEAM_DOMAIN": "",
+        "POLICY_AUD": "",
+        "UPLOAD_PREFIX": "",
+        "REQUIRE_ACCESS": "true",
+        "CUSTOMER_NAME": "",
+        "R2_BUCKET_NAME": "CHANGEME-dev",
+        "CF_ACCOUNT_ID": "",
+        "PUBLIC_BASE_URL": ""
+      },
+      "observability": {
+        "enabled": true
+      }
+    },
+    "production": {
+      "name": "CHANGEME-r2-upload-client-prod",
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "CHANGEME-prod"
+        }
+      ],
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/api/*"]
+      },
+      "vars": {
+        "TEAM_DOMAIN": "",
+        "POLICY_AUD": "",
+        "UPLOAD_PREFIX": "",
+        "REQUIRE_ACCESS": "true",
+        "CUSTOMER_NAME": "",
+        "R2_BUCKET_NAME": "CHANGEME-prod",
+        "CF_ACCOUNT_ID": "",
+        "PUBLIC_BASE_URL": ""
+      },
+      "observability": {
+        "enabled": true
+      }
+    }
+  }
+}

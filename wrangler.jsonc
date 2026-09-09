@@ -2,20 +2,16 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ap-r2-upload-client",
   "main": "src/index.js",
-  "compatibility_date": "2026-08-05",
+  "compatibility_date": "2026-08-06",
   "preview_urls": false,
 
-  // R2 bucket uploads land in. Add "remote": true to hit the real bucket from
-  // `wrangler dev` instead of local storage.
   "r2_buckets": [
     {
       "binding": "BUCKET",
-      "bucket_name": "demo-services"
+      "bucket_name": "apmultimedianewsroom-dev"
     }
   ],
 
-  // Static assets are served WITHOUT invoking the Worker, so /api/* must be
-  // routed to the Worker explicitly. Requires wrangler >= 4.20.0.
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
@@ -23,23 +19,13 @@
   },
 
   "vars": {
-    // Cloudflare Access team domain, e.g. "https://yourteam.cloudflareaccess.com".
-    // Fill in after enabling Access on the Worker.
-    "TEAM_DOMAIN": "https://restless-night-6892.cloudflareaccess.com",
-    // The Access application's Audience (AUD) tag.
-    "POLICY_AUD": "c5476c16df2a5ee3abf7992749255d2929ed4ba559b73655a81e2c2d39e1c682",
-    // Optional: confine all uploads under this prefix. Set to "" to allow
-    // uploads anywhere in the bucket (bucket-wide browsing and upload).
+    "TEAM_DOMAIN": "https://dawn-pond-66c2.cloudflareaccess.com",
+    "POLICY_AUD": "fc6dee6a43291920a74745da151b1dac0b7888850fcc4433a182bfde98c7a275",
     "UPLOAD_PREFIX": "",
-    // MUST be "true" in production. "false" only for local `wrangler dev`,
-    // where no Access JWT exists.
     "REQUIRE_ACCESS": "true",
-    // Per-engagement UI chrome. CUSTOMER_NAME is the header kicker; hide when "".
     "CUSTOMER_NAME": "Associated Press",
-    // Display name for the bucket (binding does not expose bucket_name at runtime).
-    "BUCKET_LABEL": "demo-services",
-    // Optional public origin for uploaded objects, e.g. "https://cdn.example.com"
-    // or "https://pub-xxx.r2.dev". Empty = private; UI copies the full key instead.
+    "R2_BUCKET_NAME": "apmultimedianewsroom-dev",
+    "CF_ACCOUNT_ID": "d21c98f955db4c56132c2fc104a8c966",
     "PUBLIC_BASE_URL": "https://download.apmultimedianewsroom.com"
   },
 
@@ -48,12 +34,12 @@
   },
 
   "env": {
-    "production": {
-      "name": "r2-upload-client-prod",
+    "dev": {
+      "name": "ap-r2-upload-client",
       "r2_buckets": [
         {
           "binding": "BUCKET",
-          "bucket_name": "CHANGEME-prod"
+          "bucket_name": "apmultimedianewsroom-dev"
         }
       ],
       "assets": {
@@ -62,13 +48,41 @@
         "run_worker_first": ["/api/*"]
       },
       "vars": {
-        "TEAM_DOMAIN": "",
-        "POLICY_AUD": "",
+        "TEAM_DOMAIN": "https://dawn-pond-66c2.cloudflareaccess.com",
+        "POLICY_AUD": "fc6dee6a43291920a74745da151b1dac0b7888850fcc4433a182bfde98c7a275",
         "UPLOAD_PREFIX": "",
         "REQUIRE_ACCESS": "true",
-        "CUSTOMER_NAME": "",
-        "BUCKET_LABEL": "CHANGEME-prod",
-        "PUBLIC_BASE_URL": ""
+        "CUSTOMER_NAME": "Associated Press",
+        "R2_BUCKET_NAME": "apmultimedianewsroom-dev",
+        "CF_ACCOUNT_ID": "d21c98f955db4c56132c2fc104a8c966",
+        "PUBLIC_BASE_URL": "https://download.apmultimedianewsroom.com"
+      },
+      "observability": {
+        "enabled": true
+      }
+    },
+    "production": {
+      "name": "ap-r2-upload-client-prod",
+      "r2_buckets": [
+        {
+          "binding": "BUCKET",
+          "bucket_name": "apmultimedianewsroom-prod"
+        }
+      ],
+      "assets": {
+        "directory": "./public",
+        "binding": "ASSETS",
+        "run_worker_first": ["/api/*"]
+      },
+      "vars": {
+        "TEAM_DOMAIN": "https://dawn-pond-66c2.cloudflareaccess.com",
+        "POLICY_AUD": "4fab8c2cc7c33f74debf741d9311c55f5e17dc29ae822526862bf8ac3f9faf7a",
+        "UPLOAD_PREFIX": "",
+        "REQUIRE_ACCESS": "true",
+        "CUSTOMER_NAME": "Associated Press",
+        "R2_BUCKET_NAME": "apmultimedianewsroom-prod",
+        "CF_ACCOUNT_ID": "d21c98f955db4c56132c2fc104a8c966",
+        "PUBLIC_BASE_URL": "https://download.apmultimedianewsroom.com"
       },
       "observability": {
         "enabled": true
