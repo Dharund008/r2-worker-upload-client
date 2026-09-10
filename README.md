@@ -59,7 +59,7 @@ engagement; the example file (with placeholders) is what's tracked in git.
 | `POLICY_AUD` | `vars` | Access application Audience tag |
 | `UPLOAD_PREFIX` | `vars` | Optional: confine uploads under a prefix. `""` = no confinement. |
 | `CUSTOMER_NAME` | `vars` | Header brand kicker. `""` hides it. |
-| `BUCKET_LABEL` | `vars` | Display name shown in the UI (binding does not expose `bucket_name` at runtime). |
+| `R2_BUCKET_NAME` | `vars` | Display name shown in the UI (binding does not expose `bucket_name` at runtime). |
 | `PUBLIC_BASE_URL` | `vars` | Optional public origin (`https://cdn.example.com` or `https://pub-xxx.r2.dev`). `""` = private; UI copies the full key instead of a URL. |
 | `CF_ACCOUNT_ID` | `vars` | Cloudflare account ID. Required for presigned uploads (builds the S3 endpoint URL). |
 | `R2_ACCESS_KEY_ID` | **secret** | R2 S3 API access key. Required for presigned uploads. |
@@ -71,7 +71,7 @@ engagement; the example file (with placeholders) is what's tracked in git.
 npm install
 
 # 1. Copy the example config and fill in this engagement's real values
-#    (bucket names, Access domain, AUD, CUSTOMER_NAME, BUCKET_LABEL,
+#    (bucket names, Access domain, AUD, CUSTOMER_NAME, R2_BUCKET_NAME,
 #    CF_ACCOUNT_ID, and PUBLIC_BASE_URL if the bucket is public).
 #    wrangler.jsonc is gitignored — never commit it.
 cp wrangler.jsonc.example wrangler.jsonc
